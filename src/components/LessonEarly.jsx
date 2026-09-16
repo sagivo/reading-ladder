@@ -100,7 +100,7 @@ function NewSoundStep({ sound, stage, onDone, L }) {
         <div style={{ fontSize: 72 }}>{sound.emoji}</div>
         <Subtitle>/{sound.say}/ … like “{sound.keyword}”</Subtitle>
         <div style={{ display: 'flex', gap: 14 }}>
-          <BigButton small color="#6f66a8" onClick={() => speakSound(sound)}>🔁 Hear it</BigButton>
+          <BigButton small color="#6f66a8" onClick={() => speakSound(sound, { noRecord: true })}>🔁 Hear it</BigButton>
           <BigButton small color="#22a06b" onClick={() => setPhase('practice')}>I can say it ✓</BigButton>
         </div>
       </div>
@@ -150,7 +150,7 @@ function BlendStep({ items, stage, onDone, L }) {
   async function slide() {
     for (let k = 0; k < letters.length; k++) {
       setActive(k);
-      await speakSound(soundOf(letters[k]));
+      await speakSound(soundOf(letters[k]), { noRecord: true });
     }
     setActive(-1);
     await speak('Now say it fast!');
@@ -253,7 +253,7 @@ function BuildStep({ word, onDone, L }) {
     if (built.length >= letters.length) return;
     const next = letters[built.length];
     if (t === next) {
-      await speakSound(soundOf(t));
+      await speakSound(soundOf(t), { noRecord: true });
       const nb = [...built, t];
       setBuilt(nb);
       setTiles(tiles.filter((_, k) => k !== idx));

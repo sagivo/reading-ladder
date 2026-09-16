@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Screen, BigButton, Title, Subtitle, TopBar, ProgressDots, QuizStep, ChoiceButton } from './ui.jsx';
-import { narrate as speak, speakSound, stop } from '../lib/narration.js';
+import { narrate as speak, narrateQueue, speakSound, stop } from '../lib/narration.js';
 import { SOUNDS } from '../lib/curriculum.js';
 import { FIRST_SOUND_ITEMS } from '../lib/lesson.js';
 
@@ -32,6 +32,7 @@ function SameDifferent({ sounds, L, onDone }) {
   const [round, setRound] = useState(0);
   const [pair, setPair] = useState(() => makePair(sounds));
   const [answered, setAnswered] = useState(false);
+  const timerRef = React.useRef(null);
 
   function makePair(ss) {
     const a = ss[Math.floor(Math.random() * ss.length)];
@@ -44,24 +45,27 @@ function SameDifferent({ sounds, L, onDone }) {
     setAnswered(false);
     stop();
     speak('Are these two sounds the same or different? Listen.');
-    setTimeout(async () => {
-      await speakSound(pair.a);
+    // The sounds are task content, not the instruction: don't let them
+    // overwrite the "Hear it again" slot (see replay below).
+    timerRef.current = setTimeout(async () => {
+      await speakSound(pair.a, { noRecord: true });
       await new Promise((r) => setTimeout(r, 500));
-      await speakSound(pair.b);
+      await speakSound(pair.b, { noRecord: true });
     }, 1200);
+    return () => clearTimeout(timerRef.current);
   }, [round]);
 
   async function answer(same) {
     if (answered) return;
+    clearTimeout(timerRef.current); // never let late sounds cut the feedback
     setAnswered(true);
     const correct = same === pair.same;
     L.trial({ grapheme: null, word: null, format: 'recall', transfer: false, result: { correct, modeled: false, hints: correct ? 0 : 1 }, pre: true });
     await speak(correct ? 'Yes! ' + (pair.same ? 'Same sound.' : 'Different sounds!') : "Let's listen again.");
     if (!correct) {
-      await speakSound(pair.a);
-      await new Promise((r) => setTimeout(r, 400));
-      await speakSound(pair.b);
-      await speak(pair.same ? 'Same!' : 'Different!');
+      // One feedback utterance (re-listen + verdict) so "Hear it again"
+      // replays the whole modeling, not just the last word.
+      await narrateQueue(["Let's listen again.", pair.a.say, pair.b.say, pair.same ? 'Same!' : 'Different!']);
     }
     setTimeout(() => {
       if (round + 1 < 5) {
@@ -71,10 +75,12 @@ function SameDifferent({ sounds, L, onDone }) {
     }, 800);
   }
 
+  // Rehearing the sounds must not overwrite the replay slot: "Hear it
+  // again" always re-speaks the full question, not just the sounds.
   const replay = async () => {
-    await speakSound(pair.a);
+    await speakSound(pair.a, { noRecord: true });
     await new Promise((r) => setTimeout(r, 500));
-    await speakSound(pair.b);
+    await speakSound(pair.b, { noRecord: true });
   };
 
   return (
@@ -206,11 +212,11 @@ export default function LessonPre({ profile, plan, L, onFinish, onHome, initialS
   const [i, setI] = useState(() => Math.min(initialStep || 0, STEPS.length - 1));
   const step = STEPS[i];
 
-  useEffect(() => {
-    stop();
-    speak('Let\'s play with sounds!');
-  }, []);
-
+  // NOTE: no spoken greeting here on purpose. narrate() cancels whatever is
+  // playing, and a parent greeting would cut off the first game's question
+  // (child effects run before parent effects) — the child would only ever
+  // hear the greeting and never learn the task. The game's own instruction
+  // is the opener.
   // Persist lesson position so a reload mid-lesson can resume (App.jsx).
   useEffect(() => {
     if (onStep) onStep(i);

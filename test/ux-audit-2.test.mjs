@@ -19,7 +19,9 @@ test('QuizStep renders a speaker button on every choice card', () => {
   const ui = src('components/ui.jsx');
   // The speaker must announce the choice's spoken form without answering.
   assert.match(ui, /aria-label=\{`Hear: \$\{c\.speak \|\| c\.label\}`\}/);
-  assert.match(ui, /onClick=\{\(\) => speak\(c\.speak \|\| c\.label\)\}/);
+  // ...and without stealing the "Hear it again" replay slot (noRecord),
+  // so replay always re-speaks the full question.
+  assert.match(ui, /onClick=\{\(\) => speak\(c\.speak \|\| c\.label, \{ noRecord: true \}\)\}/);
   // It must be a sibling of the choice button, never nested inside it
   // (a button inside a button is invalid and would answer on tap).
   const choicesBlock = ui.slice(ui.indexOf('visible.map((c) =>'));

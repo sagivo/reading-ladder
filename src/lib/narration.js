@@ -267,10 +267,12 @@ export function preload(texts) {
 // only their import line: `import { narrate as speak, stop } from '../lib/narration.js'`.
 
 /** Speak a single phoneme (pre-generated phoneme clip).
- * Accepts a sound object ({say}) or a raw string — callers pass both. */
-export function speakSound(say) {
+ * Accepts a sound object ({say}) or a raw string — callers pass both.
+ * Pass { noRecord: true } for rehear/preview sounds so "Hear it again"
+ * keeps replaying the full instruction, not the last previewed sound. */
+export function speakSound(say, opts = {}) {
   const text = say && typeof say === 'object' ? say.say || say.g || '' : say;
-  return narrate(text);
+  return narrate(text, opts);
 }
 
 /** Speak sounds one at a time (blending preparation).

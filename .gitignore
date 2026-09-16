@@ -4,3 +4,5 @@ dist/
 
 .gh_blob_cache.json
 gh_push.log
+
+audio_catalog.json

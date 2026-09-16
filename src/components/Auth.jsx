@@ -31,6 +31,10 @@ export default function Auth({ notice, onAuthed }) {
       setError('Enter your email and password.');
       return;
     }
+    if (mode === 'signup' && password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
     setBusy(true);
     try {
       const data = mode === 'login' ? await login(em, password) : await signup(em, password);

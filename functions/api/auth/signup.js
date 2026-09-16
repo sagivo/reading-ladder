@@ -14,7 +14,8 @@ import {
   readJsonCapped,
 } from './_auth.js';
 
-// Generic message for every signup failure path (validation or conflict).
+// Generic message for the email-conflict paths (validation failures get
+// specific messages; conflicts stay generic to avoid leaking registrations).
 const SIGNUP_FAILED = 'could not create account';
 
 export async function onRequestPost({ request, env }) {
@@ -33,8 +34,14 @@ export async function onRequestPost({ request, env }) {
 
     const email = normalizeEmail(body.email);
     const pwCheck = validatePassword(body.password);
-    if (!isValidEmail(email) || !pwCheck.ok) {
-      return json({ error: SIGNUP_FAILED }, 400);
+    if (!isValidEmail(email)) {
+      return json({ error: 'Please enter a valid email address' }, 400);
+    }
+    if (!pwCheck.ok) {
+      // Surface the specific rule so the parent knows how to fix it.
+      // Validation errors reveal nothing about which emails are registered.
+      const msg = pwCheck.error.charAt(0).toUpperCase() + pwCheck.error.slice(1);
+      return json({ error: msg }, 400);
     }
 
     const taken = await d.prepare('SELECT 1 FROM parents WHERE email = ?').bind(email).first();

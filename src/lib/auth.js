@@ -1,8 +1,11 @@
 // Parent auth + parent-scoped profile API.
 // Same-origin Pages Functions; the server sets an httpOnly `rl_session`
-// cookie and the browser sends it automatically. A 401 means the session
-// is gone (logged out / expired) — callers treat AuthError as "go to login",
-// never as a generic network failure.
+// cookie and the browser sends it automatically. A 401 on an authenticated
+// endpoint means the session is gone (logged out / expired) — callers treat
+// AuthError as "go to login", never as a generic network failure.
+// The auth endpoints (/api/auth/login, /api/auth/signup) also return 401
+// for plain credential failures, so they opt out of the AuthError mapping
+// (sessionError: false) and surface the server's message instead.
 
 export class AuthError extends Error {
   constructor(message = 'Signed out — please sign in again.') {
@@ -15,8 +18,9 @@ export function isAuthError(e) {
   return e instanceof AuthError;
 }
 
-/** fetch wrapper: 401 -> AuthError, other failures -> Error with server message. */
-export async function api(path, { method = 'GET', body } = {}) {
+/** fetch wrapper: 401 -> AuthError (unless sessionError: false),
+    other failures -> Error with server message. */
+export async function api(path, { method = 'GET', body, sessionError = true } = {}) {
   let res;
   try {
     res = await fetch(path, {
@@ -31,7 +35,7 @@ export async function api(path, { method = 'GET', body } = {}) {
     err.cause = e;
     throw err;
   }
-  if (res.status === 401) throw new AuthError();
+  if (res.status === 401 && sessionError) throw new AuthError();
   if (!res.ok) {
     let msg = `Request failed (${res.status})`;
     try {
@@ -58,11 +62,13 @@ export function friendlyError(e) {
 }
 
 // ---- auth endpoints ----
+// login/signup opt out of the 401 -> AuthError mapping: a 401 here is a
+// plain credential failure ("invalid credentials"), not an expired session.
 export const getMe = () => api('/api/auth/me'); // -> { parent: { id, email, created_at } }
 export const login = (email, password) =>
-  api('/api/auth/login', { method: 'POST', body: { email, password } });
+  api('/api/auth/login', { method: 'POST', body: { email, password }, sessionError: false });
 export const signup = (email, password) =>
-  api('/api/auth/signup', { method: 'POST', body: { email, password } });
+  api('/api/auth/signup', { method: 'POST', body: { email, password }, sessionError: false });
 export const logout = () => api('/api/auth/logout', { method: 'POST' });
 export const adopt = (profiles) =>
   api('/api/auth/adopt', { method: 'POST', body: { profiles } }); // -> { adopted: [ids] }

@@ -209,3 +209,127 @@ test('readJsonCapped rejects oversized and invalid bodies', async () => {
   const r2 = await readJsonCapped(bad);
   assert.equal(r2.ok, false);
 });
+
+// --- client: api() 401 handling -----------------------------------------------
+
+import { api, AuthError, isAuthError, friendlyError } from '../src/lib/auth.js';
+import { onRequestPost as signupPost } from '../functions/api/auth/signup.js';
+
+const realFetch = globalThis.fetch;
+function stubFetch(status, body) {
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+}
+function restoreFetch() {
+  globalThis.fetch = realFetch;
+}
+
+test('api() maps 401 to AuthError on authenticated endpoints', async () => {
+  stubFetch(401, { error: 'unauthorized' });
+  try {
+    await assert.rejects(api('/api/auth/me'), (e) => {
+      assert.ok(isAuthError(e), 'expected AuthError');
+      assert.equal(friendlyError(e), 'Your session expired — please sign in again.');
+      return true;
+    });
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('api() does NOT map 401 to AuthError for login (sessionError: false)', async () => {
+  stubFetch(401, { error: 'invalid credentials' });
+  try {
+    await assert.rejects(
+      api('/api/auth/login', { method: 'POST', body: { email: 'a@b.co', password: 'wrong' }, sessionError: false }),
+      (e) => {
+        assert.ok(!isAuthError(e), 'must not be AuthError');
+        assert.equal(e.message, 'invalid credentials');
+        assert.equal(friendlyError(e), 'invalid credentials');
+        return true;
+      }
+    );
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('api() does NOT map 401 to AuthError for signup (sessionError: false)', async () => {
+  stubFetch(401, { error: 'invalid credentials' });
+  try {
+    await assert.rejects(
+      api('/api/auth/signup', { method: 'POST', body: { email: 'a@b.co', password: 'x' }, sessionError: false }),
+      (e) => {
+        assert.ok(!isAuthError(e), 'must not be AuthError');
+        assert.equal(e.message, 'invalid credentials');
+        return true;
+      }
+    );
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('api() surfaces the server validation message on 400 signup', async () => {
+  stubFetch(400, { error: 'Password must be at least 8 characters' });
+  try {
+    await assert.rejects(
+      api('/api/auth/signup', { method: 'POST', body: {}, sessionError: false }),
+      (e) => {
+        assert.equal(e.message, 'Password must be at least 8 characters');
+        assert.equal(friendlyError(e), 'Password must be at least 8 characters');
+        return true;
+      }
+    );
+  } finally {
+    restoreFetch();
+  }
+});
+
+// --- server: signup validation messages ----------------------------------------
+
+const fakeD1 = {
+  prepare() {
+    return {
+      bind() {
+        return {
+          first: async () => null,
+          run: async () => ({ success: true }),
+        };
+      },
+    };
+  },
+};
+const fakeEnv = { DB: fakeD1 };
+function signupRequest(payload) {
+  return {
+    request: new Request('https://reading.example/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+    env: fakeEnv,
+  };
+}
+
+test('signup rejects a short password with the specific rule', async () => {
+  const res = await signupPost(signupRequest({ email: 'a@b.co', password: 'short' }));
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'Password must be at least 8 characters' });
+});
+
+test('signup rejects an invalid email with a specific message', async () => {
+  const res = await signupPost(signupRequest({ email: 'not-an-email', password: 'longenough1' }));
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'Please enter a valid email address' });
+});
+
+test('signup still succeeds with valid input (stubbed D1)', async () => {
+  const res = await signupPost(signupRequest({ email: 'parent@example.com', password: 'longenough1' }));
+  assert.equal(res.status, 201);
+  const data = await res.json();
+  assert.equal(data.parent.email, 'parent@example.com');
+});

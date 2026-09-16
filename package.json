@@ -13,6 +13,7 @@
   "private": true,
   "scripts": {
     "build": "vite build && node scripts/stage_audio.mjs && npm run build:worker",
+    "prebuild": "node scripts/build_audio_manifest.mjs",
     "dev": "vite",
     "preview": "vite preview",
     "test": "node --test \"test/*.mjs\"",

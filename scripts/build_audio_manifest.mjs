@@ -1,6 +1,6 @@
 // Build-time manifest of pre-generated narration MP3s.
 //
-// Scans public/audio/{sarah,brian}/ and writes src/lib/audioManifest.js:
+// Scans public/audio/kristy/ and writes src/lib/audioManifest.js:
 // a Set of "voice/sha256(voice|text)[:32]" entries for every staged clip.
 //
 // Why: ~80% of spoken strings have no pre-generated clip yet. For those,
@@ -23,7 +23,7 @@ const audioDir = path.join(root, 'public', 'audio');
 const outFile = path.join(root, 'src', 'lib', 'audioManifest.js');
 
 const entries = [];
-for (const voice of ['sarah', 'brian']) {
+for (const voice of ['kristy']) {
   const dir = path.join(audioDir, voice);
   if (!fs.existsSync(dir)) continue;
   for (const f of fs.readdirSync(dir)) {

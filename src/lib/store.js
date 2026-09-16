@@ -100,7 +100,7 @@ export function newProfile(name, avatar) {
     name,
     avatar,
     track: null, // 'pre' | 'early' — set by the readiness check
-    voice: 'sarah', // narration voice: 'sarah' | 'brian' (parent picks)
+    voice: 'kristy', // narration voice (single Speechify voice)
     placement: null,
     level: 0, // index into SOUNDS: current target sound
     mastery: {}, // grapheme -> { status, attempts: [] }

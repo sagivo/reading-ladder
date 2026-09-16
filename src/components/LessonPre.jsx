@@ -208,7 +208,7 @@ export default function LessonPre({ profile, plan, L, onFinish, onHome, initialS
 
   useEffect(() => {
     stop();
-    speak(`Let's play with sounds, ${profile.name}!`);
+    speak('Let\'s play with sounds!');
   }, []);
 
   // Persist lesson position so a reload mid-lesson can resume (App.jsx).

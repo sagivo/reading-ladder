@@ -1,19 +1,20 @@
 // Authoritative narration catalog for The Reading Ladder.
 //
 // Enumerates EVERY string the app can speak through lib/narration.js,
-// computes the content-hash address for both voices
-//   sha256(voice + '|' + text).slice(0,32) + '.mp3'
+// computes the content-hash address for the single Kristy voice
+//   sha256('kristy|' + text).slice(0,32) + '.mp3'
 // (exactly what lib/narration.js audioUrl() computes at runtime) and
-// compares against the staged clips in public/audio/{sarah,brian}/.
+// compares against the staged clips in public/audio/kristy/.
 //
 // Two categories:
 //   FIXED  — finite strings; each must have a pre-generated MP3.
-//            Missing ones are the backlog for scripts/generate_audio.py.
-//   DYNAMIC — contain a child's name (unbounded); these honestly fall back
+//            Missing ones are the backlog for scripts/generate_audio_speechify.py.
+//   DYNAMIC — genuinely unbounded at runtime (the filled offline mission:
+//            template × sound × lesson word); these honestly fall back
 //            to Web Speech at runtime and are never "missing".
 //
 // Run: node scripts/build_audio_catalog.mjs
-// Writes: /tmp/audio_catalog.json (full list) + prints a coverage report.
+// Writes: $RL_CATALOG or /tmp/audio_catalog.json (full list) + coverage report.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,7 +33,9 @@ import {
 // numbers lie. (An earlier revision imported a cleanSpokenText that never
 // existed in narration.js, which crashed this script outright.)
 
-const VOICES = ['sarah', 'brian'];
+// Single voice: Kristy (Speechify). Hash scheme unchanged:
+//   sha256(`${voice}|${text}`).slice(0, 32)
+const VOICES = ['kristy'];
 // Clips ship in the repo under public/audio/ (vendored); override with
 // RL_AUDIO_DIR for a local staging folder.
 const AUDIO_DIR = process.env.RL_AUDIO_DIR || new URL('../public/audio', import.meta.url).pathname;
@@ -105,7 +108,7 @@ add('Last game! Listen. cat. sun. Tap what you heard.', 'pre-order');
 add('Listen: dog … fish. Tap what you heard, in order.', 'pre-order');
 add('Listen: cat … sun. Tap what you heard, in order.', 'pre-order');
 for (const w of ['dog fish', 'fish dog', 'cat sun', 'sun cat']) add(w, 'pre-order-choice');
-addDynamic("Let's play with sounds, {name}!", 'child name — unbounded');
+add("Let's play with sounds!", 'pre-start');
 
 // ---------- 6. Early-reader lesson ----------
 add("Let's warm up. Tap the word you hear.", 'early-warmup');
@@ -123,9 +126,13 @@ add('Tap the word you just read.', 'early-blend-quiz');
 for (let n = 1; n <= 30; n++) {
   add(`You read ${n} ${n === 1 ? 'word' : 'words'}.`, 'end-screen');
 }
-addDynamic('Hi {name}! / Welcome back, {name}! / Let\'s read, {name}!', 'child name — unbounded');
-addDynamic('All done, {name}! …', 'child name — unbounded');
-addDynamic('{name}, you are ready to be an early reader! …', 'child name — unbounded');
+add('All done for today! Come back tomorrow for a new lesson.', 'home');
+add('Welcome back! Let\'s keep going.', 'home');
+add('You are ready to be an early reader! You will learn letter sounds and read real words.', 'placement');
+add('You are a listening reader! You will play sound games and learn letter sounds by ear.', 'placement');
+// Session-end offline mission: filled per lesson ({say}/{g}/{word}/{keyword})
+// — unbounded combinations, Web Speech fallback. Everything else is fixed.
+addDynamic('{mission template × sound × word} — offline mission, filled per lesson', 'unbounded combinations');
 
 // ---------- 7. QuizStep feedback language ----------
 add('Tap the glowing one.', 'quiz-feedback');
@@ -173,10 +180,10 @@ for (const [text, cats] of fixed) {
     const fn = `${hash(v, text)}.mp3`;
     per[v] = staged[v].has(fn);
   }
-  rows.push({ text, categories: [...cats], sarah: per.sarah, brian: per.brian });
+  rows.push({ text, categories: [...cats], kristy: per.kristy });
 }
 
-const missing = rows.filter((r) => !r.sarah || !r.brian);
+const missing = rows.filter((r) => !r.kristy);
 const byCat = {};
 for (const r of missing) {
   for (const c of r.categories) {
@@ -186,13 +193,13 @@ for (const r of missing) {
   }
 }
 
-fs.writeFileSync('/tmp/audio_catalog.json', JSON.stringify({ generated: new Date().toISOString(), rows }, null, 1));
+fs.writeFileSync(process.env.RL_CATALOG || '/tmp/audio_catalog.json', JSON.stringify({ generated: new Date().toISOString(), rows }, null, 1));
 
 console.log('=== Reading Ladder narration catalog ===');
 console.log(`fixed strings: ${fixed.size} | dynamic (name-bearing): ${dynamic.size}`);
-console.log(`staged clips: sarah=${staged.sarah.size} brian=${staged.brian.size}`);
-console.log(`fully covered (both voices): ${rows.length - missing.length}`);
-console.log(`missing at least one voice: ${missing.length}`);
+console.log(`staged clips: kristy=${staged.kristy.size}`);
+console.log(`covered: ${rows.length - missing.length}`);
+console.log(`missing: ${missing.length}`);
 console.log(`seeded stories generated: ${storyCount}`);
 console.log('\n--- missing by category ---');
 for (const [c, s] of Object.entries(byCat).sort((a, b) => b[1].n - a[1].n)) {

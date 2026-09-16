@@ -104,7 +104,7 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
     if (profiles.length === 0) {
       speak('No readers yet. A grown-up can add the first reader.');
     } else if (active && doneToday) {
-      speak(`All done for today, ${active.name}! Come back tomorrow for a new lesson.`);
+      speak('All done for today! Come back tomorrow for a new lesson.');
     } else {
       speak('Tap your picture to pick who is reading.');
     }
@@ -158,7 +158,7 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
           {resume && onResume ? (
             <BigButton
               color="#22a06b"
-              onClick={() => { speak(`Welcome back, ${active.name}! Let's keep going.`); onResume(active.id); }}
+              onClick={() => { speak('Welcome back! Let\'s keep going.'); onResume(active.id); }}
             >
               {resume.kind === 'readiness' ? `⏯ Continue ${active.name}'s check` : `⏯ Continue ${active.name}'s lesson`}
             </BigButton>

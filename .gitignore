@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .DS_Store
+
+.gh_blob_cache.json
+gh_push.log

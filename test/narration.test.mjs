@@ -32,14 +32,14 @@ function pyHash(voice, text) {
 // playClip() takes the MP3 path, the way production does for covered clips.
 {
   const entries = [];
-  for (const voice of ['sarah', 'brian'])
+  for (const voice of ['kristy'])
     for (const text of ['Hi.', "Let's try again.", 'Which one starts with mmm? Tap it.', 'One.', 'Two.'])
       entries.push(`${voice}/${pyHash(voice, text)}`);
   N.__setAudioManifestForTest(entries);
 }
 
 test('audioUrl matches the Python content-hash scheme (same-origin static assets)', async () => {
-  for (const [voice, text] of [['sarah', 'Hi.'], ['brian', "Let's try again."], ['sarah', 'Which one starts with mmm? Tap it.']]) {
+  for (const [voice, text] of [['kristy', 'Hi.'], ['kristy', "Let's try again."], ['kristy', 'Which one starts with mmm? Tap it.']]) {
     const url = await N.audioUrl(voice, text);
     const expected = `/audio/${voice}/${pyHash(voice, text)}.mp3`;
     assert.equal(url, expected, `hash mismatch for ${voice}|${text}`);
@@ -48,16 +48,16 @@ test('audioUrl matches the Python content-hash scheme (same-origin static assets
 
 test('narrate() plays the MP3 for the current voice', async () => {
   playedUrls.length = 0;
-  N.setVoice('sarah');
+  N.setVoice('kristy');
   await N.narrate('Hi.');
   assert.equal(playedUrls.length, 1);
-  assert.ok(playedUrls[0].includes('/audio/sarah/'), `wrong voice in URL: ${playedUrls[0]}`);
+  assert.ok(playedUrls[0].includes('/audio/kristy/'), `wrong voice in URL: ${playedUrls[0]}`);
   assert.ok(playedUrls[0].endsWith('.mp3'));
 });
 
 test('replayLast() re-plays from the beginning', async () => {
   playedUrls.length = 0;
-  N.setVoice('sarah');
+  N.setVoice('kristy');
   await N.narrate('Hi.');
   const first = playedUrls[0];
   await N.replayLast();
@@ -65,16 +65,15 @@ test('replayLast() re-plays from the beginning', async () => {
   assert.equal(playedUrls[1], first, 'replay must re-request the same clip (fresh Audio = from start)');
 });
 
-test('voice switching changes the addressed asset', async () => {
+test('single voice: setVoice ignores unknown voices', async () => {
   playedUrls.length = 0;
-  N.setVoice('sarah');
+  N.setVoice('kristy');
   await N.narrate('Hi.');
-  N.setVoice('brian');
+  N.setVoice('sarah'); // legacy voice no longer exists — must be ignored
   await N.narrate('Hi.');
-  assert.ok(playedUrls[0].includes('/audio/sarah/'));
-  assert.ok(playedUrls[1].includes('/audio/brian/'));
-  assert.notEqual(playedUrls[0], playedUrls[1]);
-  N.setVoice('sarah'); // restore default
+  assert.ok(playedUrls[0].includes('/audio/kristy/'));
+  assert.ok(playedUrls[1].includes('/audio/kristy/'), 'unknown voice must not change addressing');
+  assert.equal(playedUrls[0], playedUrls[1]);
 });
 
 test('narrateQueue plays parts in order', async () => {

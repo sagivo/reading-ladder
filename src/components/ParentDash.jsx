@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Screen, BigButton, Title, Subtitle, ChoiceButton } from './ui.jsx';
-import { narrate as speak, setVoice as previewVoice, getVoice, VOICES } from '../lib/narration.js';
+import { narrate as speak } from '../lib/narration.js';
 import { SOUNDS, PREVIEW_WORDS } from '../lib/curriculum.js';
 import { nextTargetIndex, pendingMisses } from '../lib/mastery.js';
 import { getSyncState, syncNow, onSyncState } from '../lib/sync.js';
@@ -60,7 +60,7 @@ function Card({ title, children }) {
   );
 }
 
-function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSetVoice, onBack, store, refreshSync, parent, onLogout, onManageKids, onSessionExpired, onClaimUnclaimed }) {
+function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBack, store, refreshSync, parent, onLogout, onManageKids, onSessionExpired, onClaimUnclaimed }) {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(null);
   const [confirmTrack, setConfirmTrack] = useState(false);
@@ -155,28 +155,11 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
         ))}
       </div>
 
-      {/* Narration voice picker (per kid, synced). Preview plays instantly. */}
+      {/* Narration uses one pre-recorded voice (Kristy) for every kid. */}
       <div style={{ marginTop: 18, padding: 16, background: '#f4f1ff', borderRadius: 16 }}>
-        <div style={{ fontWeight: 800, marginBottom: 8 }}>Narration voice for {p.name}</div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {Object.entries(VOICES).map(([id, v]) => {
-            const selected = (p.voice || 'sarah') === id;
-            return (
-              <button
-                key={id}
-                onClick={() => { onSetVoice(p.id, id); previewVoice(id); speak(`Hi! I'm ${v.label}. Pick a story and I'll read it to you.`); }}
-                aria-pressed={selected}
-                style={{
-                  padding: '10px 18px', borderRadius: 16, fontSize: 17, fontWeight: 700, cursor: 'pointer',
-                  border: selected ? '4px solid #7c5cd6' : '3px solid #d9d3f2',
-                  background: selected ? '#e6dcff' : '#fff',
-                }}
-              >{selected ? '✓ ' : ''}{v.label} — {v.hint}</button>
-            );
-          })}
-        </div>
-        <div style={{ fontSize: 13, color: '#6b6390', marginTop: 8 }}>
-          Voices are pre-recorded — switching is instant.
+        <div style={{ fontWeight: 800, marginBottom: 4 }}>Narration voice</div>
+        <div style={{ fontSize: 15, color: '#5b567d' }}>
+          Kristy — warm teacher voice. Every line in the app is pre-recorded with her, so it always sounds the same.
         </div>
       </div>
 

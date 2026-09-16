@@ -1,0 +1,15 @@
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+body {
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  background: #f5f0ff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+button { font-family: inherit; touch-action: manipulation; }
+button:active { transform: scale(0.97); }
+input { font-family: inherit; }

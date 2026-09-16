@@ -1,0 +1,21 @@
+{
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "description": "The Reading Ladder \u2014 a finite, audio-first phonics tutor for ages 3\u20135. No ads, no IAP, no streaks.",
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.3.5"
+  },
+  "name": "reading-ladder",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "test": "node --test test/decodability.test.mjs"
+  },
+  "type": "module",
+  "version": "0.1.0"
+}

@@ -12,7 +12,7 @@
   "name": "reading-ladder",
   "private": true,
   "scripts": {
-    "build": "vite build && npm run build:worker",
+    "build": "vite build && node scripts/stage_audio.mjs && npm run build:worker",
     "dev": "vite",
     "preview": "vite preview",
     "test": "node --test \"test/*.mjs\"",

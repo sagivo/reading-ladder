@@ -5,7 +5,7 @@
 
 import { SOUNDS, WORD_BANK, MISSIONS, PREVIEW_WORDS } from './curriculum.js';
 import { taughtThrough, isDecodable, assertDecodable } from './decodability.js';
-import { generateStory } from './story.js';
+import { generateStory, mulberry32 } from './story.js';
 import { pendingMisses, nextTargetIndex } from './mastery.js';
 
 function shuffle(arr, rng = Math.random) {
@@ -83,7 +83,13 @@ export function buildEarlyLesson(profile) {
   // Story: only when the sound set can form sentences (stage >= 3).
   let story = null;
   try {
-    if (soundIndex >= 3) story = generateStory(soundIndex);
+    // Stories are pre-generated ONCE per (stage, seed) and stored as MP3s
+    // (scripts/build_manifest.mjs). Pin the RNG to the seeded pool
+    // (seeds 1..25) so the runtime never needs live TTS.
+    if (soundIndex >= 3) {
+      const seed = 1 + ((profile.sessions ? profile.sessions.length : 0) % 25);
+      story = generateStory(soundIndex, mulberry32(seed));
+    }
   } catch {
     story = null;
   }
@@ -109,4 +115,46 @@ export function buildPreLesson(profile) {
     focus.keyword
   );
   return { kind: 'pre', sounds, focus, exposure, mission };
+}
+
+// ---- Lesson orchestration (pure, shared by components and tests) ----------
+
+/**
+ * Ordered step ids for a built plan. The single source of truth for the
+ * lesson loop: review -> sound -> blend|firstsound -> build? -> story?
+ * (pre-reader track: same -> first -> pair -> order).
+ */
+export function stepsForPlan(plan) {
+  if (plan.kind === 'pre') return ['same', 'first', 'pair', 'order'];
+  const steps = [];
+  if (plan.review && plan.review.length) steps.push('review');
+  steps.push('sound');
+  steps.push(plan.blendWords && plan.blendWords.length >= 2 ? 'blend' : 'firstsound');
+  if (plan.buildWord) steps.push('build');
+  if (plan.story) steps.push('story');
+  return steps;
+}
+
+/**
+ * Minimal lesson-runner state machine (pure, unit-testable).
+ * Regression guard for the dead-end bug where a lesson step never
+ * advanced: every step must be completable and advance() must eventually
+ * report done. Components mirror this machine; tests walk it end to end.
+ */
+export function createLessonRunner(plan) {
+  const steps = stepsForPlan(plan);
+  let i = 0;
+  return {
+    steps: steps.slice(),
+    index: () => i,
+    current: () => steps[i],
+    /** Mark the current step complete and move on. Returns {done}. */
+    advance: () => {
+      if (i + 1 < steps.length) {
+        i += 1;
+        return { done: false, step: steps[i], index: i };
+      }
+      return { done: true, index: i };
+    },
+  };
 }

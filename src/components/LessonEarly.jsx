@@ -5,11 +5,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { Screen, BigButton, Title, Subtitle, TopBar, ProgressDots, QuizStep, ChoiceButton, randomPraise } from './ui.jsx';
-import { speak, speakSound, stop } from '../lib/speech.js';
+import { narrate as speak, speakSound, stop } from '../lib/narration.js';
 import { SOUNDS, WORD_BANK, PREVIEW_WORDS } from '../lib/curriculum.js';
 import { parseGraphemes } from '../lib/decodability.js';
 import { taughtThrough, isDecodable } from '../lib/decodability.js';
-import { FIRST_SOUND_ITEMS } from '../lib/lesson.js';
+import { FIRST_SOUND_ITEMS, stepsForPlan } from '../lib/lesson.js';
 
 function soundOf(g) {
   return SOUNDS.find((s) => s.g === g) || { g, say: g, keyword: g, emoji: '🔤' };
@@ -53,6 +53,7 @@ function ReviewStep({ misses, stage, onDone, L }) {
 
   return (
     <QuizStep
+      key={i}
       instruction={instruction}
       choices={shuffle([
         { id: miss.ref, label: miss.ref, speak: miss.ref },
@@ -172,6 +173,7 @@ function BlendStep({ items, stage, onDone, L }) {
 
   return (
     <QuizStep
+      key={i}
       instruction="Tap the word you just read."
       choices={shuffle([
         { id: item.word, label: item.word, speak: item.word },
@@ -202,6 +204,7 @@ function FirstSoundStep({ sound, onDone, L }) {
 
   return (
     <QuizStep
+      key={trial}
       instruction={instruction}
       choices={shuffle([
         { id: 'yes', label: target[1], sub: target[0], speak: target[0] },
@@ -340,6 +343,7 @@ function StoryStep({ story, onDone, L }) {
   }
   return (
     <QuizStep
+      key="story-quiz"
       instruction={q.prompt + ' Tap the answer.'}
       choices={q.choices.map((c) => ({ id: c, label: c, speak: c }))}
       correctId={q.correct}
@@ -354,18 +358,19 @@ function StoryStep({ story, onDone, L }) {
 // ---------- Orchestrator ----------
 const STEP_TITLES = ['Warm-up 🔥', 'New sound ✨', 'Stretch & read 🐌', 'Build it 🧱', 'Story time 📖'];
 
-export default function LessonEarly({ profile, plan, L, onFinish, onHome }) {
-  // Build the step list dynamically (some steps are conditional).
-  const steps = [];
-  if (plan.review.length) steps.push('review');
-  steps.push('sound');
-  steps.push(plan.blendWords.length >= 2 ? 'blend' : 'firstsound');
-  if (plan.buildWord) steps.push('build');
-  if (plan.story) steps.push('story');
+export default function LessonEarly({ profile, plan, L, onFinish, onHome, initialStep = 0, onStep }) {
+  // Step list is the shared pure function (src/lib/lesson.js) so the
+  // lesson can never disagree with the resume/test harness about order.
+  const steps = stepsForPlan(plan);
 
-  const [i, setI] = useState(0);
+  const [i, setI] = useState(() => Math.min(initialStep || 0, steps.length - 1));
   const [wordsRead, setWordsRead] = useState(0);
   const step = steps[i];
+
+  // Persist lesson position so a reload mid-lesson can resume (App.jsx).
+  useEffect(() => {
+    if (onStep) onStep(i);
+  }, [i]);
   const replay = {
     review: 'Tap the word you hear.',
     sound: `The letter ${plan.sound.g} says ${plan.sound.say}.`,

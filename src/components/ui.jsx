@@ -2,8 +2,9 @@
 // Interaction grammar: one actionable object per screen, targets >= 48px
 // (here: much bigger), replay always visible, audio instruction + visual demo.
 
-import React, { useState } from 'react';
-import { speak, stop } from '../lib/speech.js';
+import React, { useState, useRef, useEffect } from 'react';
+import { narrate as speak, narrateQueue, stop, replayLast } from '../lib/narration.js';
+import { createTrial } from '../lib/quizstep.js';
 
 export function Screen({ children, bg = 'linear-gradient(160deg, #f5f0ff 0%, #eef6ff 100%)' }) {
   return (
@@ -98,7 +99,7 @@ export function TopBar({ onHome, replayText, replayLabel = '🔁 Hear it again' 
       >🏠</button>
       {replayText ? (
         <button
-          onClick={() => speak(replayText)}
+          onClick={() => replayLast()}
           style={{
             minHeight: 56, padding: '8px 20px', fontSize: 20, fontWeight: 700,
             borderRadius: 18, border: '3px solid #7c5cd6', background: '#fff',
@@ -120,56 +121,89 @@ export function randomPraise() {
   return PRAISE[Math.floor(Math.random() * PRAISE.length)];
 }
 
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 /**
  * A forgiving multiple-choice trial implementing the error language:
  *  1st miss -> repeat the goal (same choices, re-spoken instruction)
  *  2nd miss -> reduce choices
  *  3rd miss -> model it: highlight the answer, child taps to copy
  * onResult({ correct, modeled, hints }) — correct=false when modeled.
+ *
+ * Every tap gets immediate gentle VISUAL feedback (a 3-year-old can't rely
+ * on audio alone); audio narration mirrors it. Callers must remount per
+ * question (key={trial}) so a finished trial never swallows input.
  */
 export function QuizStep({ instruction, choices, correctId, onResult, speakInstruction = true }) {
-  const [misses, setMisses] = useState(0);
-  const [reduced, setReduced] = useState(false);
-  const [modeled, setModeled] = useState(false);
-  const [done, setDone] = useState(false);
+  // Shuffle once per trial: re-shuffling on every render makes the buttons
+  // jump around mid-question, which is miserable for a small child.
+  const [shuffled] = useState(() => shuffle(choices));
+  const trialRef = useRef(null);
+  if (!trialRef.current) trialRef.current = createTrial(shuffled, correctId);
+  const [, bump] = useState(0);
+  const [feedback, setFeedback] = useState(null); // { text } — gentle, never harsh
+  const render = () => bump((n) => n + 1);
 
-  const visible = choices.filter((c) => {
-    if (!reduced) return true;
-    if (c.id === correctId) return true;
-    // keep one distractor: the first non-correct choice
-    return c.id === choices.find((x) => x.id !== correctId).id;
-  });
+  const trial = trialRef.current;
+  const st = trial.getState();
+  const visible = trial.visibleChoices();
+  const correctChoice = trial.correctChoice;
 
-  const correctChoice = choices.find((c) => c.id === correctId);
+  // Speak the instruction when the question appears (audio-first for pre-readers).
+  useEffect(() => {
+    if (speakInstruction && instruction) {
+      speak(instruction);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleTap(choice) {
-    if (done) return;
-    if (modeled) {
-      if (choice.id === correctId) {
-        setDone(true);
-        await speak('Good copying!');
-        onResult({ correct: false, modeled: true, hints: 3 });
-      } else {
-        await speak('Tap the glowing one.');
-      }
+    const ev = trial.tap(choice.id);
+    if (ev.kind === 'ignored') return;
+    render();
+    if (ev.kind === 'correct') {
+      const praise = randomPraise();
+      setFeedback({ text: `🎉 ${praise}` });
+      // Fire-and-forget: the lesson advances on its own short timer. Awaiting
+      // narration here made correct taps feel "ignored" whenever audio was
+      // slow (e.g. falling through to the safety net or Web Speech).
+      speak(praise);
+      onResult({ correct: true, modeled: false, hints: ev.hints });
       return;
     }
-    if (choice.id === correctId) {
-      setDone(true);
-      await speak(randomPraise());
-      onResult({ correct: true, modeled: false, hints: misses });
+    if (ev.kind === 'copied') {
+      setFeedback({ text: '🎉 Good copying!' });
+      speak('Good copying!');
+      onResult({ correct: false, modeled: true, hints: 3 });
       return;
     }
-    const n = misses + 1;
-    setMisses(n);
-    if (n === 1) {
-      await speak("Let's try again. " + instruction);
-    } else if (n === 2) {
-      setReduced(true);
-      await speak('Fewer choices. ' + instruction);
-    } else {
-      setModeled(true);
-      await speak(`Watch. The answer is ${correctChoice.speak || correctChoice.label}. Now you tap it.`);
+    if (ev.kind === 'copy-hint') {
+      setFeedback({ text: 'Tap the glowing one! ✨' });
+      await speak('Tap the glowing one.');
+      return;
+    }
+    if (ev.kind === 'retry') {
+      setFeedback({ text: 'Good try! Listen once more. 🌱' });
+      await narrateQueue(["Let's try again.", instruction]);
+      return;
+    }
+    if (ev.kind === 'reduce') {
+      setFeedback({ text: "You're working hard — fewer choices now. 💪" });
+      await narrateQueue(['Fewer choices.', instruction]);
+      return;
+    }
+    if (ev.kind === 'model') {
+      const c = ev.correctChoice || correctChoice;
+      setFeedback({ text: 'Watch me, then you tap it! 👀' });
+      await narrateQueue(['Watch. The answer is', c.speak || c.label, 'Now you tap it.']);
+      return;
     }
   }
 
@@ -181,13 +215,22 @@ export function QuizStep({ instruction, choices, correctId, onResult, speakInstr
           <ChoiceButton
             key={c.id}
             onClick={() => handleTap(c)}
-            highlight={modeled && c.id === correctId}
-            dimmed={done && c.id !== correctId}
+            highlight={st.modeled && c.id === correctId}
+            dimmed={st.done && c.id !== correctId}
           >
             {c.label}
             {c.sub ? <div style={{ fontSize: 20, fontWeight: 600 }}>{c.sub}</div> : null}
           </ChoiceButton>
         ))}
+      </div>
+      <div
+        aria-live="polite"
+        style={{
+          minHeight: 34, fontSize: 22, fontWeight: 700, color: '#5b567d',
+          textAlign: 'center', visibility: feedback ? 'visible' : 'hidden',
+        }}
+      >
+        {feedback ? feedback.text : '·'}
       </div>
     </div>
   );

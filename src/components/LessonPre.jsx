@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Screen, BigButton, Title, Subtitle, TopBar, ProgressDots, QuizStep, ChoiceButton } from './ui.jsx';
-import { speak, speakSound, stop } from '../lib/speech.js';
+import { narrate as speak, speakSound, stop } from '../lib/narration.js';
 import { SOUNDS } from '../lib/curriculum.js';
 import { FIRST_SOUND_ITEMS } from '../lib/lesson.js';
 
@@ -197,14 +197,19 @@ const REPLAY = {
   order: 'Tap the pictures in the order you heard.',
 };
 
-export default function LessonPre({ profile, plan, L, onFinish, onHome }) {
-  const [i, setI] = useState(0);
+export default function LessonPre({ profile, plan, L, onFinish, onHome, initialStep = 0, onStep }) {
+  const [i, setI] = useState(() => Math.min(initialStep || 0, STEPS.length - 1));
   const step = STEPS[i];
 
   useEffect(() => {
     stop();
     speak(`Let's play with sounds, ${profile.name}!`);
   }, []);
+
+  // Persist lesson position so a reload mid-lesson can resume (App.jsx).
+  useEffect(() => {
+    if (onStep) onStep(i);
+  }, [i]);
 
   function advance() {
     setTimeout(() => {

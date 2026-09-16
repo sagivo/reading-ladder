@@ -46,6 +46,7 @@ export function newProfile(name, avatar) {
     name,
     avatar,
     track: null, // 'pre' | 'early' — set by the readiness check
+    voice: 'sarah', // narration voice: 'sarah' | 'brian' (parent picks)
     placement: null,
     level: 0, // index into SOUNDS: current target sound
     mastery: {}, // grapheme -> { status, attempts: [] }
@@ -97,8 +98,7 @@ export function ackEvents(store, ids) {
   store.queue = store.queue.filter((e) => !set.has(e.id));
 }
 
-/** Profile ids the parent chose NOT to claim ("Skip" in the claim flow). */
-export function loadDismissedClaimIds() {
+/** Profile ids the parent chose NOT to claim ("Skip" in the claim flow). */export function loadDismissedClaimIds() {
   try {
     const raw = typeof localStorage !== 'undefined' && localStorage.getItem(CLAIM_DISMISSED_KEY);
     const ids = raw ? JSON.parse(raw) : [];
@@ -111,6 +111,49 @@ export function loadDismissedClaimIds() {
 export function saveDismissedClaimIds(ids) {
   try {
     localStorage.setItem(CLAIM_DISMISSED_KEY, JSON.stringify(ids));
+  } catch {
+    /* ignore */
+  }
+}
+
+// ---- In-lesson progress (resume after reload) ------------------------------
+// A reload mid-lesson used to drop the child back at the profile picker with
+// the lesson gone. We persist { plan, step } per profile; Home offers
+// "Continue lesson" while it is fresh (< 24h). Cleared on finishLesson.
+
+const LESSON_KEY = 'reading-ladder-lesson-v1';
+const LESSON_TTL_MS = 24 * 60 * 60 * 1000;
+
+export function saveLessonProgress(profileId, plan, step) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LESSON_KEY) || '{}');
+    all[profileId] = { plan, step, savedAt: Date.now() };
+    localStorage.setItem(LESSON_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadLessonProgress(profileId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LESSON_KEY) || '{}');
+    const r = all[profileId];
+    if (!r || !r.plan || typeof r.step !== 'number') return null;
+    if (Date.now() - (r.savedAt || 0) > LESSON_TTL_MS) {
+      clearLessonProgress(profileId);
+      return null;
+    }
+    return r;
+  } catch {
+    return null;
+  }
+}
+
+export function clearLessonProgress(profileId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LESSON_KEY) || '{}');
+    delete all[profileId];
+    localStorage.setItem(LESSON_KEY, JSON.stringify(all));
   } catch {
     /* ignore */
   }

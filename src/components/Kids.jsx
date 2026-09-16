@@ -37,7 +37,9 @@ const inputStyle = {
 function KidForm({ initial, submitLabel, busy, onSubmit, onCancel }) {
   const [name, setName] = useState(initial.name || '');
   const [avatar, setAvatar] = useState(initial.avatar || AVATARS[0]);
-  const [birthYear, setBirthYear] = useState(initial.birthYear ? String(initial.birthYear) : '');
+  const [birthYear, setBirthYear] = useState(
+    initial.birthYear ? String(initial.birthYear) : String(new Date().getFullYear() - 4)
+  );
   const [formError, setFormError] = useState(null);
   const suggestion = suggestionFor(birthYear);
 

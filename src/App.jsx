@@ -24,12 +24,14 @@ import ParentDash from './components/ParentDash.jsx';
 import Companion from './components/Companion.jsx';
 import { Screen, Title, Subtitle } from './components/ui.jsx';
 import { loadStore, saveStore, touchProfile, queueEvent, loadDismissedClaimIds } from './lib/store.js';
+import { saveLessonProgress, loadLessonProgress, clearLessonProgress } from './lib/store.js';
 import { mergeOnLaunch, syncNow } from './lib/sync.js';
 import { getMe, logout, listProfiles, isAuthError } from './lib/auth.js';
 import { buildEarlyLesson, buildPreLesson } from './lib/lesson.js';
 import { recordAttempt, newSoundMastery, addMiss, clearMiss, nextTargetIndex, isMastered } from './lib/mastery.js';
 import { SOUNDS, ACCESSORIES } from './lib/curriculum.js';
 import { setSoundEnabled } from './lib/speech.js';
+import { setVoice, DEFAULT_VOICE } from './lib/narration.js';
 
 function OfflineBanner() {
   return (
@@ -55,6 +57,7 @@ export default function App() {
   );
   const [activeId, setActiveId] = useState(null);
   const [plan, setPlan] = useState(null);
+  const [resumeStep, setResumeStep] = useState(0);
   const [summary, setSummary] = useState(null);
   const [sessionStart, setSessionStart] = useState(0);
   const [soundOn, setSoundOn] = useState(true);
@@ -231,6 +234,11 @@ export default function App() {
   const activeProfiles = profiles.filter((p) => !p.archived);
   const profile = activeId ? store.profiles[activeId] : null;
 
+  // Narration follows the kid's chosen voice (Sarah default).
+  useEffect(() => {
+    setVoice(profile && profile.voice ? profile.voice : DEFAULT_VOICE);
+  }, [activeId, profile && profile.voice]);
+
   // ---- trial recording (mastery state machine + miss queue) ----
   const recordTrial = useCallback(({ grapheme, word, format, transfer, result, pre }) => {
     if (!activeId) return;
@@ -286,17 +294,23 @@ export default function App() {
     }
   }
 
-  function beginLesson(p) {
-    const lp = p.track === 'early' ? buildEarlyLesson(p) : buildPreLesson(p);
+  function beginLesson(p, saved = null) {
+    const lp = saved && saved.plan ? saved.plan : (p.track === 'early' ? buildEarlyLesson(p) : buildPreLesson(p));
     setPlan(lp);
+    setResumeStep(saved && typeof saved.step === 'number' ? saved.step : 0);
     setSessionStart(Date.now());
-    log(p.id, 'lesson_started', { kind: lp.kind, sound: lp.sound ? lp.sound.g : lp.focus.g });
+    if (!saved) {
+      log(p.id, 'lesson_started', { kind: lp.kind, sound: lp.sound ? lp.sound.g : lp.focus.g });
+    } else {
+      log(p.id, 'lesson_resumed', { kind: lp.kind, step: saved.step });
+    }
     setScreen('lesson');
   }
 
   function finishLesson(sum) {
     const minutes = Math.max(1, Math.round((Date.now() - sessionStart) / 60000));
     const id = activeId;
+    clearLessonProgress(id);
     let unlocked = null;
     commit((s) => {
       const p = s.profiles[id];
@@ -340,6 +354,14 @@ export default function App() {
     });
   }
 
+  function setProfileVoice(id, voice) {
+    updateProfile(id, (p) => { p.voice = voice === 'brian' ? 'brian' : 'sarah'; });
+    log(id, 'voice_set', { voice });
+    syncNow().catch((e) => {
+      if (isAuthError(e)) handleSessionExpired();
+    });
+  }
+
   function overrideTrack(id, track) {
     updateProfile(id, (p) => { p.track = track; });
     log(id, 'track_set', { track, overridden: true });
@@ -351,6 +373,16 @@ export default function App() {
   function goHome() {
     setScreen('home');
     setPlan(null);
+  }
+
+  // In-lesson position for the resume offer on Home.
+  function handleLessonStep(i) {
+    if (activeId && plan) saveLessonProgress(activeId, plan, i);
+  }
+
+  function resumeInfoFor(id) {
+    if (!id) return null;
+    return loadLessonProgress(id);
   }
 
   const parentScreens = ['home', 'kids', 'parent', 'claim'];
@@ -395,6 +427,15 @@ export default function App() {
             setSoundOn(v);
             setSoundEnabled(v);
           }}
+          resumeFor={resumeInfoFor}
+          onResume={(id) => {
+            const p = store.profiles[id];
+            const saved = loadLessonProgress(id);
+            if (p && saved) {
+              setActiveId(id);
+              beginLesson(p, saved);
+            }
+          }}
         />
       )}
       {screen === 'kids' && (
@@ -418,10 +459,10 @@ export default function App() {
         />
       )}
       {screen === 'lesson' && profile && plan && plan.kind === 'early' && (
-        <LessonEarly profile={profile} plan={plan} L={L} onHome={goHome} onFinish={finishLesson} />
+        <LessonEarly profile={profile} plan={plan} L={L} onHome={goHome} onFinish={finishLesson} initialStep={resumeStep} onStep={handleLessonStep} />
       )}
       {screen === 'lesson' && profile && plan && plan.kind === 'pre' && (
-        <LessonPre profile={profile} plan={plan} L={L} onHome={goHome} onFinish={finishLesson} />
+        <LessonPre profile={profile} plan={plan} L={L} onHome={goHome} onFinish={finishLesson} initialStep={resumeStep} onStep={handleLessonStep} />
       )}
       {screen === 'end' && profile && summary && (
         <SessionEnd
@@ -449,6 +490,7 @@ export default function App() {
           activeId={activeId || (activeProfiles[0] && activeProfiles[0].id)}
           onSelectProfile={setActiveId}
           onOverrideTrack={overrideTrack}
+          onSetVoice={setProfileVoice}
           onBack={goHome}
           parent={parent}
           onLogout={doLogout}

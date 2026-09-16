@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { Screen, BigButton, Title, Subtitle, ChoiceButton } from './ui.jsx';
-import { speak } from '../lib/speech.js';
+import { narrate as speak, setVoice as previewVoice, getVoice, VOICES } from '../lib/narration.js';
 import { SOUNDS, PREVIEW_WORDS } from '../lib/curriculum.js';
 import { nextTargetIndex, pendingMisses } from '../lib/mastery.js';
 import { getSyncState, syncNow } from '../lib/sync.js';
@@ -15,18 +15,29 @@ import { pendingCount } from '../lib/store.js';
 function Gate({ onPass, onCancel }) {
   const [a] = useState(4 + Math.floor(Math.random() * 5));
   const [b] = useState(3 + Math.floor(Math.random() * 5));
+  const [missed, setMissed] = useState(false);
   const answer = a + b;
   const options = [answer - 1, answer, answer + 1].sort(() => Math.random() - 0.5);
   return (
     <Screen>
       <Title>🔒 Grown-ups only</Title>
-      <Subtitle>What is {a} + {b}?</Subtitle>
+      <Subtitle>{`What is ${a} + ${b}?`}</Subtitle>
       <div style={{ display: 'flex', gap: 12 }}>
         {options.map((o) => (
-          <ChoiceButton key={o} onClick={() => (o === answer ? onPass() : speak('Try again.'))}>
+          <ChoiceButton
+            key={o}
+            onClick={() => {
+              if (o === answer) { onPass(); return; }
+              setMissed(true);
+              speak('Try again.');
+            }}
+          >
             <span style={{ fontSize: 36 }}>{o}</span>
           </ChoiceButton>
         ))}
+      </div>
+      <div aria-live="polite" style={{ minHeight: 30, fontSize: 19, fontWeight: 700, color: '#5b567d', visibility: missed ? 'visible' : 'hidden' }}>
+        Not quite — try again.
       </div>
       <button onClick={onCancel} style={{ background: 'none', border: 'none', color: '#9a94c7', fontSize: 18, textDecoration: 'underline', cursor: 'pointer' }}>Back</button>
     </Screen>
@@ -49,9 +60,11 @@ function Card({ title, children }) {
   );
 }
 
-function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBack, store, refreshSync, parent, onLogout, onManageKids, onSessionExpired }) {
+function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSetVoice, onBack, store, refreshSync, parent, onLogout, onManageKids, onSessionExpired }) {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(null);
+  const [confirmTrack, setConfirmTrack] = useState(false);
+  const [trackMsg, setTrackMsg] = useState(null);
   const sync = { ...getSyncState(), pending: pendingCount(store) };
   const p = profiles.find((x) => x.id === activeId) || profiles[0];
 
@@ -89,12 +102,19 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBac
     }
   }
 
+  // Honest sync labeling: a non-empty queue is NOT "offline". The old label
+  // said "📴 Offline — N events waiting" for ANY pending count, which hid
+  // real server errors (and once hid a D1 500) behind a connectivity story.
+  const pendingN = sync.pending || 0;
+  const pendingBit = pendingN > 0 ? ` (${pendingN} waiting)` : '';
   const syncLabel =
     sync.state === 'auth' ? '🔒 Signed out — please sign in again' :
     sync.state === 'syncing' || syncing ? '🔄 Syncing…' :
-    sync.pending > 0 ? `📴 Offline — ${sync.pending} event${sync.pending === 1 ? '' : 's'} waiting to sync` :
-    sync.state === 'offline' ? '📴 Offline — will sync when connected' :
-    '✅ Synced';
+    sync.state === 'server_error' ? `⚠️ Couldn't sync just now — progress is safe on this device${pendingBit}` :
+    sync.state === 'offline' ? `📴 Offline — will sync when connected${pendingBit}` :
+    pendingN > 0 ? `⏳ ${pendingN} change${pendingN === 1 ? '' : 's'} waiting to sync` :
+    sync.lastSyncAt ? '✅ Synced' :
+    '⏳ Waiting for first sync';
 
   const shownError = syncError || (sync.state !== 'auth' ? sync.error : null);
 
@@ -120,6 +140,31 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBac
             }}
           >{x.avatar} {x.name}</button>
         ))}
+      </div>
+
+      {/* Narration voice picker (per kid, synced). Preview plays instantly. */}
+      <div style={{ marginTop: 18, padding: 16, background: '#f4f1ff', borderRadius: 16 }}>
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>Narration voice for {p.name}</div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {Object.entries(VOICES).map(([id, v]) => {
+            const selected = (p.voice || 'sarah') === id;
+            return (
+              <button
+                key={id}
+                onClick={() => { onSetVoice(p.id, id); previewVoice(id); speak(`Hi! I'm ${v.label}. Pick a story and I'll read it to you.`); }}
+                aria-pressed={selected}
+                style={{
+                  padding: '10px 18px', borderRadius: 16, fontSize: 17, fontWeight: 700, cursor: 'pointer',
+                  border: selected ? '4px solid #7c5cd6' : '3px solid #d9d3f2',
+                  background: selected ? '#e6dcff' : '#fff',
+                }}
+              >{selected ? '✓ ' : ''}{v.label} — {v.hint}</button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 13, color: '#6b6390', marginTop: 8 }}>
+          Voices are pre-recorded — switching is instant.
+        </div>
       </div>
 
       <Title>{p.avatar} {p.name} <span style={{ fontSize: 20, fontWeight: 600, color: '#5b567d' }}>
@@ -196,12 +241,45 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBac
           Story preview words (taught explicitly, may contain untaught sounds): {PREVIEW_WORDS.join(', ')}
         </div>
         <div style={{ marginTop: 10 }}>
-          <button
-            onClick={() => onOverrideTrack(p.id, p.track === 'early' ? 'pre' : 'early')}
-            style={{ background: 'none', border: 'none', color: '#7c5cd6', fontSize: 17, textDecoration: 'underline', cursor: 'pointer' }}
-          >
-            Switch track to {p.track === 'early' ? 'listening reader' : 'early reader'}
-          </button>
+          {!confirmTrack ? (
+            <button
+              onClick={() => setConfirmTrack(true)}
+              style={{ background: 'none', border: 'none', color: '#7c5cd6', fontSize: 17, textDecoration: 'underline', cursor: 'pointer' }}
+            >
+              Switch track to {p.track === 'early' ? 'listening reader' : 'early reader'}
+            </button>
+          ) : (
+            <div style={{ background: '#f4f1ff', border: '3px solid #7c5cd6', borderRadius: 16, padding: 14 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 10 }}>
+                Switch {p.name} to the {p.track === 'early' ? 'listening reader' : 'early reader'} track?
+                Their lesson plan restarts on the new track.
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => {
+                    const next = p.track === 'early' ? 'pre' : 'early';
+                    onOverrideTrack(p.id, next);
+                    setConfirmTrack(false);
+                    setTrackMsg(`✓ ${p.name} is now on the ${next === 'early' ? 'early reader' : 'listening reader'} track.`);
+                  }}
+                  style={{ padding: '10px 18px', borderRadius: 14, border: 'none', background: '#7c5cd6', color: '#fff', fontSize: 17, fontWeight: 800, cursor: 'pointer' }}
+                >
+                  Yes, switch
+                </button>
+                <button
+                  onClick={() => setConfirmTrack(false)}
+                  style={{ padding: '10px 18px', borderRadius: 14, border: '3px solid #d9d4f5', background: '#fff', fontSize: 17, fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Keep current track
+                </button>
+              </div>
+            </div>
+          )}
+          {trackMsg && (
+            <div role="status" style={{ marginTop: 10, fontSize: 17, fontWeight: 700, color: '#22a06b' }}>
+              {trackMsg}
+            </div>
+          )}
         </div>
       </Card>
     </Screen>

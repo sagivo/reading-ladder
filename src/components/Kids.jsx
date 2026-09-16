@@ -20,11 +20,11 @@ function validAge(a) {
   return n >= 0 && n <= 18;
 }
 
-/** 'early' | 'pre' | null — a suggestion only; the readiness game still decides. */
+/** 'main' | 'basics' | null — a suggestion only; the readiness game still decides. */
 function suggestionFor(age) {
   const a = (age || '').trim();
   if (!validAge(a)) return null;
-  return parseInt(a, 10) >= 4 ? 'early' : 'pre';
+  return parseInt(a, 10) >= 4 ? 'main' : 'basics';
 }
 
 const inputStyle = {
@@ -100,8 +100,8 @@ function KidForm({ initial, submitLabel, busy, onSubmit, onCancel }) {
           background: '#fff7d6', border: '3px solid #f5b301', borderRadius: 16,
           padding: '10px 18px', fontSize: 18, textAlign: 'center', maxWidth: 420,
         }}>
-          💡 Suggestion: <b>{suggestion === 'early' ? 'early reader 📖' : 'listening reader 👂'}</b>
-          {' '}— kids {suggestion === 'early' ? '4 and up' : 'under 4'} often start here.
+          💡 Suggestion: <b>{suggestion === 'main' ? 'early reader 📖' : 'sound explorer 👂'}</b>
+          {' '}— kids {suggestion === 'main' ? '4 and up' : 'under 4'} often start here.
           The 4-minute readiness game still decides the track.
         </div>
       )}
@@ -147,7 +147,7 @@ function KidCard({ p, onStart, onEdit, onArchive, confirming, onConfirmArchive, 
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 26, fontWeight: 800 }}>{p.name}</div>
           <div style={{ fontSize: 17, color: '#5b567d' }}>
-            {trackLabel(p.track)} · Level {p.level + 1} · {p.sessions.length} {p.sessions.length === 1 ? 'lesson' : 'lessons'}
+            {trackLabel(p.track)} · {p.v2 ? (p.v2.track === 'basics' ? 'sounds' : `level ${p.v2.level}`) : `Level ${p.level + 1}`} · {p.sessions.length} {p.sessions.length === 1 ? 'lesson' : 'lessons'}
             {p.serverPending ? ' · 📴 on this device only' : ''}
           </div>
         </div>

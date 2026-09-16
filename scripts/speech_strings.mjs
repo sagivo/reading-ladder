@@ -110,6 +110,9 @@ export function extractSpokenLiterals(srcDir) {
         i++;
         while (i < src.length && src[i] !== ']') {
           i = skipWs(src, i);
+          if (src[i] === ']') break; // the check above runs pre-skip; without
+          // this, whitespace before ']' makes the loop step OVER the bracket
+          // and swallow the rest of the file as "array elements".
           if (src[i] === "'" || src[i] === '"' || src[i] === '`') {
             const r = parseString(src, i);
             if (!r) break;

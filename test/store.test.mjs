@@ -95,3 +95,33 @@ test('didLessonToday: malformed session entries never block', () => {
   assert.equal(didLessonToday({ sessions: [null, {}, { at: 'not-a-date' }] }), false);
   assert.equal(didLessonToday({ sessions: 'oops' }), false);
 });
+
+const {
+  loadSitting, saveSitting, clearSitting, SITTING_GAP_MS,
+} = await import('../src/lib/store.js');
+
+test('sitting clock: save/load round-trips the sitting', () => {
+  mem.clear();
+  assert.equal(loadSitting(), null);
+  const s = { profileId: 'k1', start: Date.now() - 60000, lastActive: Date.now() };
+  saveSitting(s);
+  assert.deepEqual(loadSitting(), s);
+});
+
+test('sitting clock: clearSitting removes it', () => {
+  saveSitting({ profileId: 'k1', start: Date.now(), lastActive: Date.now() });
+  clearSitting();
+  assert.equal(loadSitting(), null);
+});
+
+test('sitting clock: malformed or incomplete values load as null', () => {
+  mem.clear();
+  mem.set('reading-ladder-sitting-v1', 'not-json');
+  assert.equal(loadSitting(), null);
+  saveSitting({ profileId: 'k1' }); // no start
+  assert.equal(loadSitting(), null);
+});
+
+test('sitting clock: gap constant is one hour', () => {
+  assert.equal(SITTING_GAP_MS, 60 * 60 * 1000);
+});

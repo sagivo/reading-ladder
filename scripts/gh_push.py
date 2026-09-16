@@ -106,40 +106,53 @@ def main():
     # Local HEAD is stale relative to main (API commits never land locally),
     # so `deleted` can name files already gone from main. Deleting a path that
     # isn't in the base tree is a no-op request GitHub may reject — filter.
-    base_paths = {t["path"] for t in api("GET", f"/repos/{REPO}/git/trees/{base_tree}?recursive=1")["tree"]}
+    base_tree_full = api("GET", f"/repos/{REPO}/git/trees/{base_tree}?recursive=1")["tree"]
+    base_paths = {t["path"] for t in base_tree_full}
+    base_blobs = {t["path"]: t["sha"] for t in base_tree_full if t.get("type") == "blob"}
     skipped = [p for p in deleted if p not in base_paths]
     deleted = [p for p in deleted if p in base_paths]
     if skipped:
         print(f"skipping {len(skipped)} deletions already absent from main", flush=True)
     tree = []
+    reused = 0
     for i, path in enumerate(changed):
-        sha = blob_for(path)
+        # Local HEAD is stale (earlier REST pushes landed on main but never
+        # locally), so most staged files are byte-identical to main's tree.
+        # Reuse the base blob SHA instead of re-uploading them.
+        local_sha = subprocess.check_output(["git", "hash-object", path], text=True).strip()
+        if base_blobs.get(path) == local_sha:
+            sha = local_sha
+            reused += 1
+        else:
+            sha = blob_for(path)
         tree.append({"path": path, "mode": "100644", "type": "blob", "sha": sha})
         if (i + 1) % 200 == 0:
-            print(f"  blobs {i+1}/{len(changed)}", flush=True)
+            print(f"  blobs {i+1}/{len(changed)} (reused {reused})", flush=True)
+    print(f"  blobs done: {len(changed)} files, {reused} reused from main, {len(changed) - reused} uploaded", flush=True)
     for path in deleted:
         tree.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
     save_cache(blob_cache)
-    msg = ("Fix spoken instructions: races, replay, catalog drift\n\n"
-           "- Readiness/LessonPre: parent greeting effects cut off the game's spoken\n"
-           "  question (child effects run first, narrate() stops current audio).\n"
-           "  The actionable direction now opens every screen.\n"
-           "- Reliable replay: speakSound() takes { noRecord }; choice speakers and\n"
-           "  delayed sounds no longer overwrite the 'Hear it again' slot.\n"
-           "- SameDifferent: delayed sounds cancelled on early answer; wrong-answer\n"
-           "  modeling via narrateQueue so replay re-speaks the whole explanation.\n"
-           "- BlendGame wording 'tap one circle' (not 'token'); chained on clip\n"
-           "  completion so sounds can't cut the next question.\n"
-           "- SessionEnd: narrateQueue of fixed parts instead of one dynamic string\n"
-           "  that forced the whole summary through Web Speech.\n"
-           "- Removed dynamic child-name speaks (Home) for fixed generic strings.\n"
-           "- Catalog builder: source-literal extraction safety net (scripts/\n"
-           "  speech_strings.mjs) — a reworded speak() can no longer silently lose\n"
-           "  its clip; stale directions fixed; Build-the-word x WORD_BANK enumerated.\n"
-           "- test/audio-coverage.test.mjs: drift guard fails CI when a spoken\n"
-           "  literal has no pre-generated clip in the manifest.\n"
-           "- 253 new Kristy clips; orphan-clip cleanup; rebuilt manifest.\n"
-           "- Tests 111/111.")
+    msg = ("V2 rebuild: Mentava-inspired lesson UX, beanstalk level map, session accounting\n\n"
+           "- New v2 lesson arc (DiscoverBarn -> RecognizeSheep -> BlendVoice ->\n"
+           "  ReadStory -> GoFindSomeone) replacing the old QuizStep chain; single\n"
+           "  LevelLesson shell owns Screen/TopBar/ProgressDots.\n"
+           "- Beanstalk level map: our own take on the level map — one node per\n"
+           "  activity in lesson order, stars for completed, buds for locked;\n"
+           "  the child taps the glowing node to launch the next activity.\n"
+           "- Mentava proportion pass: giant viewport-relative letters, minimal\n"
+           "  chrome, persistent star badge, aged-paper story book.\n"
+           "- BlendVoice repaired: mic hold-to-say flow, stream/AudioContext\n"
+           "  cleanup on unmount, large visual star CTA for the no-mic path.\n"
+           "- Session accounting: Home exit preserves lesson progress without\n"
+           "  recording a session; 1-hour sitting gap resumes the fatigue clock.\n"
+           "- Final level (37) ends the sitting with a curriculum-complete\n"
+           "  celebration.\n"
+           "- Readiness: audio-first directions, neutral ghost-tap demos,\n"
+           "  basics/main placement.\n"
+           "- Catalog rebuilt (615 fixed strings); new clips pending Speechify\n"
+           "  credit refill.\n"
+           "- Tests 122/123 (1 pre-existing audio-coverage failure: the missing\n"
+           "  Kristy clips blocked on credits).")
     # GitHub 502s on huge single trees: split into stacked commits of <=600 entries.
     CHUNK = 600
     parent, parent_tree = base, base_tree

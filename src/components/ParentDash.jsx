@@ -6,8 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { Screen, BigButton, Title, Subtitle, ChoiceButton } from './ui.jsx';
 import { narrate as speak } from '../lib/narration.js';
-import { SOUNDS, PREVIEW_WORDS } from '../lib/curriculum.js';
-import { nextTargetIndex, pendingMisses } from '../lib/mastery.js';
+import { ORDER, META, levelOfGrapheme, newSound, levelKind, ensureV2Profile } from '../lib/curriculum2.js';
 import { getSyncState, syncNow, onSyncState } from '../lib/sync.js';
 import { isAuthError, friendlyError } from '../lib/auth.js';
 import { pendingCount } from '../lib/store.js';
@@ -84,11 +83,15 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBac
     );
   }
 
-  const targetIdx = nextTargetIndex(p, SOUNDS);
-  const target = SOUNDS[targetIdx];
-  const misses = pendingMisses(p, 10);
+  // v2 progress: levels & stars. ensureV2Profile is read-only here in
+  // practice (profiles that reached the dashboard already went through
+  // beginLesson), but calling it keeps un-migrated profiles renderable.
+  ensureV2Profile(p);
+  const v2 = p.v2;
   const totalMinutes = p.sessions.reduce((n, s) => n + (s.minutes || 0), 0);
-  const masteredCount = Object.values(p.mastery).filter((m) => m.status === 'mastered').length;
+  const nextLevel = v2.track === 'basics' ? v2.basicsAt : v2.level;
+  const nextG = levelKind(nextLevel) === 'review' ? null : newSound(nextLevel);
+  const nextMeta = nextG ? META[nextG] : null;
 
   async function doSync() {
     setSyncing(true);
@@ -164,20 +167,17 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBac
       </div>
 
       <Title>{p.avatar} {p.name} <span style={{ fontSize: 20, fontWeight: 600, color: '#5b567d' }}>
-        ({p.track === 'early' ? 'early reader' : p.track === 'pre' ? 'listening reader' : 'not placed yet'})
+        ({v2.track === 'main' ? 'early reader' : v2.track === 'basics' ? 'sound explorer' : 'not placed yet'})
       </span></Title>
 
-      {p.placement && (
-        <Card title="🧭 Placement results (from the 4-minute readiness game)">
+      {p.placement && p.placement.done && (
+        <Card title="🧭 Readiness check (🐶🐟 dogfish vs 🐟🐶 fishdog)">
           <div style={{ fontSize: 17, lineHeight: 1.7 }}>
-            <div>👂 Sound order: <b>{p.placement.seq}/2</b></div>
-            <div>🗣️ Sound blending: <b>{p.placement.blend}/2</b></div>
-            <div>🔤 Letter sounds: <b>{p.placement.letters}/5</b></div>
-            {p.placement.reasons && p.placement.reasons.length > 0 && (
-              <div style={{ color: '#5b567d', marginTop: 6 }}>
-                {p.placement.reasons.map((r, i) => <div key={i}>• {r}</div>)}
-              </div>
-            )}
+            <div>Score: <b>{p.placement.score != null ? `${p.placement.score}/2` : '—'}</b> → {v2.track === 'main' ? 'main track' : 'sounds-only basics track'}</div>
+            <div style={{ color: '#5b567d', marginTop: 6 }}>
+              The check tests whether order matters to your child (dog+fish vs fish+dog).
+              Basics kids learn letter sounds only — no blending — until they're ready.
+            </div>
             {p.placement.overridden && (
               <div style={{ color: '#5b567d', marginTop: 6 }}>Track set by a grown-up (not the game).</div>
             )}
@@ -229,65 +229,63 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBac
         </div>
       </Card>
 
-      <Card title="📊 What can they do now?">
+      <Card title="⭐ Stars & sounds">
         <div style={{ fontSize: 19 }}>
-          <b>{masteredCount}</b> sounds mastered · <b>{p.sessions.length}</b> lessons completed · <b>{totalMinutes}</b> min total
+          <b>{v2.stars.length}</b> {v2.stars.length === 1 ? 'star' : 'stars'} earned ·{' '}
+          {v2.track === 'basics' ? 'sounds-only basics' : v2.completedAll ? (
+            <>🎉 all 30 sounds learned — practicing!</>
+          ) : (
+            <>on level <b>{v2.level}</b> of 37</>
+          )} ·{' '}
+          <b>{p.sessions.length}</b> sessions
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
-          {SOUNDS.map((s) => {
-            const m = p.mastery[s.g];
-            const st = m ? STATUS_STYLE[m.status] || STATUS_STYLE.todo : STATUS_STYLE.todo;
+          {ORDER.map((g) => {
+            const lv = levelOfGrapheme(g);
+            const st = v2.stars.includes(lv) ? STATUS_STYLE.mastered
+              : lv === nextLevel ? STATUS_STYLE.learning
+              : lv < nextLevel ? STATUS_STYLE.introduced
+              : STATUS_STYLE.todo;
+            const m = META[g];
             return (
               <div
-                key={s.g}
-                title={`${s.g} (${s.say}): ${st.label}`}
+                key={g}
+                title={`${g} (${m.say}, like ${m.keyword}): ${st.label}`}
                 style={{
-                  width: 46, height: 52, borderRadius: 12, background: st.bg, border: `3px solid ${st.border}`,
+                  minWidth: 46, height: 52, padding: '0 8px', borderRadius: 12, background: st.bg, border: `3px solid ${st.border}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 20, fontWeight: 800,
                 }}
-              >{s.g}</div>
+              >{g}</div>
             );
           })}
         </div>
         <div style={{ fontSize: 15, color: '#5b567d', marginTop: 8 }}>
-          🟩 mastered · 🟨 learning · ⬜ introduced / not yet
+          🟩 level complete · 🟨 up next · ⬜ introduced · ⬜ not yet — one new sound per level, every 5th level reviews.
         </div>
-      </Card>
-
-      <Card title="🧭 Where are they stuck?">
-        {misses.length === 0 ? (
-          <div style={{ fontSize: 19 }}>No open misses — nothing needs review. 🎉</div>
-        ) : (
-          <div style={{ fontSize: 19 }}>
-            {misses.length} item{misses.length === 1 ? '' : 's'} queued for review:{' '}
-            {misses.map((m) => m.ref).join(', ')}
-            <div style={{ fontSize: 16, color: '#5b567d', marginTop: 6 }}>
-              These resurface automatically at the start of the next lesson.
-            </div>
-          </div>
-        )}
       </Card>
 
       <Card title="⏱️ Screen time">
         <div style={{ fontSize: 19 }}>
-          {p.sessions.length} lessons · {totalMinutes} minutes total
+          {p.sessions.length} sessions · {totalMinutes} minutes total
           {p.sessions.length > 0 && <> · last: {p.sessions[p.sessions.length - 1].minutes} min</>}
         </div>
         <div style={{ fontSize: 16, color: '#5b567d', marginTop: 6 }}>
-          Design target: 8–18 minutes per lesson, then the tablet goes away.
+          Design target: 15–30 minutes, then the animals get sleepy and the tablet goes away.
+          No streaks, no rankings — the routine is the reward.
         </div>
       </Card>
 
       <Card title="➡️ What comes next?">
         <div style={{ fontSize: 19 }}>
-          Next sound: <b>{target.g}</b> (/{target.say}/, like {target.emoji} {target.keyword})
+          {nextMeta ? (
+            <>Next sound: <b>{nextG}</b> ({nextMeta.say}, like {nextMeta.emoji} {nextMeta.keyword})</>
+          ) : (
+            <>Next up: <b>review level</b> — replaying recent sounds, no new sound</>
+          )}
         </div>
-        {p.lastMission && (
-          <div style={{ fontSize: 17, marginTop: 6 }}>Last offline mission: “{p.lastMission}”</div>
-        )}
         <div style={{ fontSize: 16, color: '#5b567d', marginTop: 6 }}>
-          Story preview words (taught explicitly, may contain untaught sounds): {PREVIEW_WORDS.join(', ')}
+          Each level: discover the sound → find it → blend it → read a tiny story → read it to someone you love.
         </div>
         <div style={{ marginTop: 10 }}>
           {!confirmTrack ? (
@@ -295,21 +293,21 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBac
               onClick={() => setConfirmTrack(true)}
               style={{ background: 'none', border: 'none', color: '#7c5cd6', fontSize: 17, textDecoration: 'underline', cursor: 'pointer' }}
             >
-              Switch track to {p.track === 'early' ? 'listening reader' : 'early reader'}
+              Switch track to {v2.track === 'main' ? 'sound explorer (no blending)' : 'early reader'}
             </button>
           ) : (
             <div style={{ background: '#f4f1ff', border: '3px solid #7c5cd6', borderRadius: 16, padding: 14 }}>
               <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 10 }}>
-                Switch {p.name} to the {p.track === 'early' ? 'listening reader' : 'early reader'} track?
-                Their lesson plan restarts on the new track.
+                Switch {p.name} to the {v2.track === 'main' ? 'sound explorer' : 'early reader'} track?
+                Progress restarts at level 1 on the new track.
               </div>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button
                   onClick={() => {
-                    const next = p.track === 'early' ? 'pre' : 'early';
+                    const next = v2.track === 'main' ? 'basics' : 'main';
                     onOverrideTrack(p.id, next);
                     setConfirmTrack(false);
-                    setTrackMsg(`✓ ${p.name} is now on the ${next === 'early' ? 'early reader' : 'listening reader'} track.`);
+                    setTrackMsg(`✓ ${p.name} is now on the ${next === 'main' ? 'early reader' : 'sound explorer'} track.`);
                   }}
                   style={{ padding: '10px 18px', borderRadius: 14, border: 'none', background: '#7c5cd6', color: '#fff', fontSize: 17, fontWeight: 800, cursor: 'pointer' }}
                 >

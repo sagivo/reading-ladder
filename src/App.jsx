@@ -16,20 +16,18 @@ import Auth from './components/Auth.jsx';
 import Claim from './components/Claim.jsx';
 import Kids from './components/Kids.jsx';
 import Readiness from './components/Readiness.jsx';
-import Placement from './components/Placement.jsx';
-import LessonEarly from './components/LessonEarly.jsx';
-import LessonPre from './components/LessonPre.jsx';
+import LevelLesson from './components/LevelLesson.jsx';
+import { companionEmoji } from './components/Home.jsx';
 import SessionEnd from './components/SessionEnd.jsx';
 import ParentDash from './components/ParentDash.jsx';
 import Companion from './components/Companion.jsx';
 import { Screen, Title, Subtitle, ParentGate } from './components/ui.jsx';
 import { loadStore, saveStore, touchProfile, queueEvent, loadDismissedClaimIds, saveDismissedClaimIds, mutateStore, clearClaimBlocked } from './lib/store.js';
-import { saveLessonProgress, loadLessonProgress, clearLessonProgress, saveReadinessProgress, loadReadinessProgress, clearReadinessProgress } from './lib/store.js';
+import { saveLessonProgress, loadLessonProgress, clearLessonProgress, clearReadinessProgress, loadSitting, saveSitting, clearSitting, SITTING_GAP_MS } from './lib/store.js';
 import { mergeOnLaunch, syncNow, onSyncState } from './lib/sync.js';
 import { getMe, logout, listProfiles, isAuthError } from './lib/auth.js';
-import { buildEarlyLesson, buildPreLesson } from './lib/lesson.js';
-import { recordAttempt, newSoundMastery, addMiss, clearMiss, nextTargetIndex, isMastered } from './lib/mastery.js';
-import { SOUNDS, ACCESSORIES } from './lib/curriculum.js';
+import { ensureV2Profile, currentV2Level, advanceV2 } from './lib/curriculum2.js';
+import { ACCESSORIES } from './lib/curriculum.js';
 import { setVoice, DEFAULT_VOICE } from './lib/narration.js';
 import { onPraise, PRAISE_MS } from './lib/praise.js';
 
@@ -78,7 +76,7 @@ function OfflineBanner() {
 
 export default function App() {
   const [store, setStore] = useState(() => loadStore());
-  const [screen, setScreen] = useState('checking'); // checking|auth|claim|home|kids|readiness|placement|lesson|end|companion|parent
+  const [screen, setScreen] = useState('checking'); // checking|auth|claim|home|kids|readiness|lesson|end|companion|parent
   const [parent, setParent] = useState(null);
   const parentRef = useRef(null);
   const [authNotice, setAuthNotice] = useState(null); // 'expired' | 'offline' | null
@@ -87,11 +85,11 @@ export default function App() {
     typeof navigator === 'undefined' ? true : navigator.onLine !== false
   );
   const [activeId, setActiveId] = useState(null);
-  const [plan, setPlan] = useState(null);
+  const [level, setLevel] = useState(1); // v2 level currently being played
   const [resumeStep, setResumeStep] = useState(0);
-  const [readinessSaved, setReadinessSaved] = useState(null); // { game, results } | null
   const [summary, setSummary] = useState(null);
   const [sessionStart, setSessionStart] = useState(0);
+  const [sessionLevels, setSessionLevels] = useState([]); // v2 levels completed this sitting
   const [newAccessory, setNewAccessory] = useState(null);
   const [kidsGate, setKidsGate] = useState(false); // grown-up check before reader management
 
@@ -284,51 +282,6 @@ export default function App() {
     setVoice(DEFAULT_VOICE);
   }, [activeId]);
 
-  // ---- trial recording (mastery state machine + miss queue) ----
-  const recordTrial = useCallback(({ grapheme, word, format, transfer, result, pre }) => {
-    if (!activeId) return;
-    commit((s) => {
-      const p = s.profiles[activeId];
-      if (!p) return;
-      let masteredNow = null;
-      if (grapheme && !pre) {
-        if (!p.mastery[grapheme]) p.mastery[grapheme] = newSoundMastery();
-        const before = p.mastery[grapheme].status;
-        recordAttempt(p.mastery[grapheme], {
-          format,
-          correct: result.correct && !result.modeled,
-          hints: result.hints || 0,
-          transfer: !!transfer,
-        });
-        if (before !== 'mastered' && p.mastery[grapheme].status === 'mastered') {
-          masteredNow = grapheme;
-        }
-      }
-      // A miss (or a heavily-hinted success) resurfaces in next review.
-      if (!result.correct || (result.hints || 0) > 0) {
-        if (word) addMiss(p, { kind: 'word', ref: word, format });
-        else if (grapheme && !pre) addMiss(p, { kind: 'sound', ref: grapheme, format });
-        queueEvent(s, p.id, 'miss_recorded', { grapheme, word, format });
-      }
-      if (masteredNow) {
-        queueEvent(s, p.id, 'sound_mastered', { grapheme: masteredNow });
-      }
-      queueEvent(s, p.id, 'trial', {
-        grapheme, word, format, transfer: !!transfer,
-        correct: result.correct, modeled: !!result.modeled, hints: result.hints || 0,
-      });
-      touchProfile(p);
-    });
-  }, [activeId]);
-
-  const L = {
-    trial: recordTrial,
-    clearMiss: (missId) => {
-      if (!activeId) return;
-      updateProfile(activeId, (p) => clearMiss(p, missId));
-    },
-  };
-
   // ---- flows ----
   /** From the dashboard's sync card: re-offer claiming for unclaimed readers. */
   function reclaimUnclaimed() {
@@ -348,43 +301,90 @@ export default function App() {
     setActiveId(id);
     if (startLesson) {
       const p = store.profiles[id];
-      if (p && !p.archived && !p.placement) {
-        // Resume a half-finished readiness check when one is saved.
-        beginReadiness(p, loadReadinessProgress(id));
-      }
+      if (p && !p.archived && !p.placement) beginReadiness(p);
       else if (p && !p.archived) beginLesson(p);
     }
   }
 
+  // v2 lesson flow: one level = discover -> recognize -> blend -> read -> perform.
+  // Levels chain inside a sitting until the fatigue threshold ends the session.
+  const FATIGUE_MS = 15 * 60 * 1000;
+
   function beginLesson(p, saved = null) {
-    const lp = saved && saved.plan ? saved.plan : (p.track === 'early' ? buildEarlyLesson(p) : buildPreLesson(p));
-    setPlan(lp);
+    updateProfile(p.id, (prof) => { ensureV2Profile(prof); });
+    const fresh = loadStore().profiles[p.id];
+    const lvl = (saved && (saved.v2level || (saved.plan && saved.plan.v2level)))
+      || currentV2Level(fresh);
+    setLevel(lvl);
     setResumeStep(saved && typeof saved.step === 'number' ? saved.step : 0);
-    setSessionStart(Date.now());
+    // The sitting's fatigue clock persists across Home exits: resuming the
+    // same day after a short break continues the clock, so leaving via Home
+    // can't grant a fresh 15 minutes. A new day or a long break starts a
+    // new sitting. (Also fixes the old relaunch bug where sessionStart was 0
+    // and fatigue triggered instantly.)
+    const now = Date.now();
+    let start = now;
+    const prev = loadSitting();
+    if (prev && prev.profileId === p.id && prev.start) {
+      const sameDay = new Date(prev.start).toDateString() === new Date(now).toDateString();
+      const gapOk = now - (prev.lastActive || prev.start) < SITTING_GAP_MS;
+      if (sameDay && gapOk) start = prev.start;
+    }
+    setSessionStart(start);
+    saveSitting({ profileId: p.id, start, lastActive: now });
     if (!saved) {
-      log(p.id, 'lesson_started', { kind: lp.kind, sound: lp.sound ? lp.sound.g : lp.focus.g });
+      setSessionLevels([]);
+      log(p.id, 'lesson_started', { level: lvl, track: fresh.v2.track });
     } else {
-      log(p.id, 'lesson_resumed', { kind: lp.kind, step: saved.step });
+      log(p.id, 'lesson_resumed', { level: lvl, step: saved.step });
     }
     setScreen('lesson');
   }
 
-  function finishLesson(sum) {
-    const minutes = Math.max(1, Math.round((Date.now() - sessionStart) / 60000));
+  function finishLevel({ level: doneLevel }) {
     const id = activeId;
     clearLessonProgress(id);
+    const minutes = Math.max(1, Math.round((Date.now() - sessionStart) / 60000));
+    let nextLvl = doneLevel;
+    let totalStars = 0;
+    let justCompletedAll = false;
+    commit((s) => {
+      const p = s.profiles[id];
+      if (!p) return;
+      ensureV2Profile(p);
+      const was = !!p.v2.completedAll;
+      nextLvl = advanceV2(p, doneLevel);
+      justCompletedAll = !was && !!p.v2.completedAll;
+      totalStars = p.v2.stars.length;
+      touchProfile(p);
+      queueEvent(s, p.id, 'level_completed', { minutes, level: doneLevel });
+    });
+    const doneLevels = [...sessionLevels, doneLevel];
+    setSessionLevels(doneLevels);
+    if (justCompletedAll) {
+      // The whole curriculum is done: celebrate and end the sitting instead
+      // of silently looping an identical level-37 lesson.
+      endSitting({ id, doneLevels, minutes, totalStars, completedAll: true });
+    } else if (Date.now() - sessionStart > FATIGUE_MS) {
+      // Sitting's over: one session record per sitting (the daily cap keys
+      // off sessions), one accessory per sitting, then the sleepy ending.
+      endSitting({ id, doneLevels, minutes, totalStars });
+    } else {
+      // Keep the sitting flowing: straight into the next level.
+      setLevel(nextLvl);
+      setResumeStep(0);
+      log(id, 'lesson_started', { level: nextLvl });
+    }
+  }
+
+  // Write one session record per sitting, award at most one accessory per
+  // sitting, clear the sitting clock, and show the end screen.
+  function endSitting({ id, doneLevels, minutes, totalStars, completedAll = false }) {
     let unlocked = null;
     commit((s) => {
       const p = s.profiles[id];
       if (!p) return;
-      p.sessions.push({ at: new Date().toISOString(), minutes, newSound: sum.newSound || sum.focusSound, wordsRead: sum.wordsRead || 0 });
-      if (p.track === 'early') {
-        p.level = nextTargetIndex(p, SOUNDS);
-      } else {
-        p.exposure = Math.min((p.exposure || 0) + 1, SOUNDS.length - 1);
-      }
-      p.lastMission = sum.mission;
-      // Finite reward: one accessory per completed session.
+      p.sessions.push({ at: new Date().toISOString(), minutes, v2: true, levels: doneLevels, completedAll });
       const idx = Math.min(p.sessions.length, ACCESSORIES.length - 1);
       const acc = ACCESSORIES[idx];
       if (acc && !p.companion.unlocked.includes(acc.id)) {
@@ -392,11 +392,11 @@ export default function App() {
         unlocked = acc.id;
       }
       touchProfile(p);
-      queueEvent(s, p.id, 'lesson_completed', { minutes, newSound: sum.newSound || sum.focusSound, wordsRead: sum.wordsRead || 0 });
-      queueEvent(s, p.id, 'session_ended', { minutes, mission: sum.mission });
+      queueEvent(s, p.id, 'session_ended', { minutes, levels: doneLevels, completedAll });
     });
+    clearSitting();
     setNewAccessory(unlocked);
-    setSummary({ ...sum, minutes });
+    setSummary({ levels: doneLevels, stars: totalStars, minutes, completedAll });
     setScreen('end');
     syncNow().catch((e) => {
       if (isAuthError(e)) handleSessionExpired();
@@ -406,34 +406,40 @@ export default function App() {
   function readinessDone(placement) {
     if (!activeId) return;
     clearReadinessProgress(activeId);
-    setReadinessSaved(null);
     updateProfile(activeId, (p) => {
       p.placement = placement;
-      p.track = placement.track;
+      p.track = placement.track; // 'main' | 'basics'
+      ensureV2Profile(p);
+      p.v2.track = placement.track;
+      p.v2.level = 1;
+      p.v2.stars = [];
+      p.v2.basicsAt = 1;
     });
     log(activeId, 'track_set', { track: placement.track, placement });
-    setScreen('placement');
+    // v2 goes straight into the first level — no placement screen.
+    beginLesson(loadStore().profiles[activeId]);
     syncNow().catch((e) => {
       if (isAuthError(e)) handleSessionExpired();
     });
   }
 
-  /** Start (or resume) the readiness check for a not-yet-placed reader. */
-  function beginReadiness(p, saved = null) {
-    setReadinessSaved(saved);
+  /** Start the readiness check for a not-yet-placed reader (always fresh —
+      two quick trials, nothing worth resuming). */
+  function beginReadiness(p) {
     setActiveId(p.id);
-    if (saved) log(p.id, 'readiness_resumed', { game: saved.game });
-    else log(p.id, 'readiness_started', {});
+    log(p.id, 'readiness_started', {});
     setScreen('readiness');
   }
 
-  /** Persist readiness-check position as the child plays (for resume). */
-  function handleReadinessProgress(game, results) {
-    if (activeId) saveReadinessProgress(activeId, game, results);
-  }
-
   function overrideTrack(id, track) {
-    updateProfile(id, (p) => { p.track = track; });
+    updateProfile(id, (p) => {
+      p.track = track;
+      ensureV2Profile(p);
+      p.v2.track = track;
+      p.v2.level = 1;
+      p.v2.stars = [];
+      p.v2.basicsAt = 1;
+    });
     log(id, 'track_set', { track, overridden: true });
     syncNow().catch((e) => {
       if (isAuthError(e)) handleSessionExpired();
@@ -441,13 +447,19 @@ export default function App() {
   }
 
   function goHome() {
+    // Leaving mid-lesson keeps the sitting clock: stamp lastActive so a
+    // same-day resume continues the sitting instead of starting a fresh one.
+    if (screen === 'lesson' && activeId) {
+      const prev = loadSitting();
+      if (prev && prev.profileId === activeId) saveSitting({ ...prev, lastActive: Date.now() });
+    }
     setScreen('home');
-    setPlan(null);
+    setLevel(1);
   }
 
-  // In-lesson position for the resume offer on Home.
+  // In-lesson position for the resume offer on Home (v2 shape: { v, v2level }).
   function handleLessonStep(i) {
-    if (activeId && plan) saveLessonProgress(activeId, plan, i);
+    if (activeId) saveLessonProgress(activeId, { v: 2, v2level: level }, i);
   }
 
   // Resume offers for Home: a half-finished readiness check ("Continue check")
@@ -457,10 +469,6 @@ export default function App() {
     if (!id) return null;
     const s = loadStore();
     const p = s.profiles[id];
-    if (p && !p.placement) {
-      const r = loadReadinessProgress(id);
-      if (r) return { kind: 'readiness', saved: r };
-    }
     const l = loadLessonProgress(id);
     if (l) return { kind: 'lesson', saved: l };
     return null;
@@ -512,8 +520,7 @@ export default function App() {
             const info = resumeInfoFor(id);
             if (!p || !info) return;
             setActiveId(id);
-            if (info.kind === 'readiness') beginReadiness(p, info.saved);
-            else beginLesson(p, info.saved);
+            beginLesson(p, info.saved);
           }}
         />
       )}
@@ -536,27 +543,22 @@ export default function App() {
       )}
       {screen === 'readiness' && profile && (
         <Readiness
-          profile={profile}
           onDone={readinessDone}
           onHome={goHome}
-          initialGame={readinessSaved ? readinessSaved.game : 0}
-          initialResults={readinessSaved ? readinessSaved.results : {}}
-          onProgress={handleReadinessProgress}
         />
       )}
-      {screen === 'placement' && profile && (
-        <Placement
-          profile={profile}
+      {screen === 'lesson' && profile && (
+        <LevelLesson
+          key={level}
+          level={level}
+          track={profile.track === 'basics' ? 'basics' : 'main'}
           onHome={goHome}
-          onStart={() => beginLesson(profile)}
-          onOverride={(track) => overrideTrack(profile.id, track)}
+          onLevelComplete={finishLevel}
+          initialStep={resumeStep}
+          onStep={handleLessonStep}
+          starCount={profile.v2 ? profile.v2.stars.length : 0}
+          companion={profile.companion ? companionEmoji(profile.companion) : null}
         />
-      )}
-      {screen === 'lesson' && profile && plan && plan.kind === 'early' && (
-        <LessonEarly profile={profile} plan={plan} L={L} onHome={goHome} onFinish={finishLesson} initialStep={resumeStep} onStep={handleLessonStep} />
-      )}
-      {screen === 'lesson' && profile && plan && plan.kind === 'pre' && (
-        <LessonPre profile={profile} plan={plan} L={L} onHome={goHome} onFinish={finishLesson} initialStep={resumeStep} onStep={handleLessonStep} />
       )}
       {screen === 'end' && profile && summary && (
         <SessionEnd

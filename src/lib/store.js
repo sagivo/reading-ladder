@@ -178,6 +178,41 @@ export function saveDismissedClaimIds(ids) {
 const LESSON_KEY = 'reading-ladder-lesson-v1';
 const LESSON_TTL_MS = 24 * 60 * 60 * 1000;
 
+// ---- sitting clock -------------------------------------------------
+// One sitting's fatigue clock persists across Home exits (same day, short
+// breaks), so leaving via Home can't grant a fresh 15 minutes. A sitting is
+// { profileId, start, lastActive }. It is cleared when the sitting ends
+// (fatigue / curriculum complete) and ignored across days or long breaks.
+
+const SITTING_KEY = 'reading-ladder-sitting-v1';
+export const SITTING_GAP_MS = 60 * 60 * 1000;
+
+export function loadSitting() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SITTING_KEY) || 'null');
+    if (!s || !s.profileId || !s.start) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSitting(sitting) {
+  try {
+    localStorage.setItem(SITTING_KEY, JSON.stringify(sitting));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearSitting() {
+  try {
+    localStorage.removeItem(SITTING_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function saveLessonProgress(profileId, plan, step) {
   try {
     const all = JSON.parse(localStorage.getItem(LESSON_KEY) || '{}');

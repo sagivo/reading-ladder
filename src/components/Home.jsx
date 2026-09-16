@@ -46,7 +46,7 @@ function ProfileCard({ p, onTap, selected }) {
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 30, fontWeight: 800 }}>{p.name}</div>
         <div style={{ fontSize: 20, color: '#5b567d' }}>
-          {p.track === 'early' ? '📖 Early reader' : p.track === 'pre' ? '👂 Listening reader' : '✨ New reader'}
+          {p.track === 'basics' ? '👂 Sound explorer' : p.track === 'main' ? '📖 Early reader' : '✨ New reader'}
           {' · '}
           {p.sessions.length} {p.sessions.length === 1 ? 'lesson' : 'lessons'} done
         </div>
@@ -104,7 +104,7 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
     if (profiles.length === 0) {
       speak('No readers yet. A grown-up can add the first reader.');
     } else if (active && doneToday) {
-      speak('All done for today! Come back tomorrow for a new lesson.');
+      speak('All done for today! Come back tomorrow for more reading.');
     } else {
       speak('Tap your picture to pick who is reading.');
     }
@@ -160,7 +160,7 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
               color="#22a06b"
               onClick={() => { speak('Welcome back! Let\'s keep going.'); onResume(active.id); }}
             >
-              {resume.kind === 'readiness' ? `⏯ Continue ${active.name}'s check` : `⏯ Continue ${active.name}'s lesson`}
+              {`⏯ Continue ${active.name}'s lesson`}
             </BigButton>
           ) : (
             <BigButton
@@ -170,7 +170,7 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
               {active.track ? `▶ Start ${active.name}'s lesson` : `▶ Play ${active.name}'s reading game`}
             </BigButton>
           )}
-          <Subtitle>{active.track ? 'One lesson a day. About 12 minutes.' : 'A 4-minute game finds your starting spot.'}</Subtitle>
+          <Subtitle>{active.track ? 'One sitting a day. About 15–30 minutes.' : 'A quick game finds your starting spot.'}</Subtitle>
           <div style={{ fontSize: 20, color: '#7c5cd6', fontWeight: 700 }} aria-live="polite">
             ✓ {active.name} is selected
           </div>

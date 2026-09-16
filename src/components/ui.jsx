@@ -61,8 +61,10 @@ export function Title({ children }) {
 
 /** Human label for a learner track. */
 export function trackLabel(track) {
-  return track === 'early' ? '📖 Early reader'
-    : track === 'pre' ? '👂 Listening reader'
+  return track === 'main' ? '📖 Early reader'
+    : track === 'basics' ? '👂 Sound explorer'
+    : track === 'early' ? '📖 Early reader' // legacy
+    : track === 'pre' ? '👂 Listening reader' // legacy
     : '✨ New reader';
 }
 
@@ -87,7 +89,7 @@ export function ProgressDots({ total, done }) {
  * Top bar: small home button (top-left) + always-visible replay button
  * and sound toggle (top-right). Replay re-speaks the current instruction.
  */
-export function TopBar({ onHome, replayText, replayLabel = '🔁 Hear it again' }) {
+export function TopBar({ onHome, replayText, replayLabel = '🔁 Hear it again', starCount = null }) {
   const [on, setOn] = useState(() => isSoundEnabled());
   function toggle() {
     const v = !on;
@@ -96,14 +98,31 @@ export function TopBar({ onHome, replayText, replayLabel = '🔁 Hear it again' 
   }
   return (
     <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <button
-        onClick={() => { stop(); onHome && onHome(); }}
-        aria-label="Home"
-        style={{
-          width: 56, height: 56, fontSize: 26, borderRadius: 18,
-          border: '3px solid #d9d4f5', background: '#fff', cursor: 'pointer',
-        }}
-      >🏠</button>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        {/* Orange star badge — the persistent progress HUD, top-left. */}
+        {starCount !== null ? (
+          <div
+            aria-label={`${starCount} stars earned`}
+            style={{
+              minHeight: 56, padding: '8px 18px', display: 'flex', alignItems: 'center', gap: 8,
+              fontSize: 24, fontWeight: 900, color: '#fff',
+              background: 'linear-gradient(160deg, #ff9d2e 0%, #f57c00 100%)',
+              borderRadius: 999, border: '3px solid #fff',
+              boxShadow: '0 4px 12px rgba(245, 124, 0, 0.35)',
+            }}
+          >
+            ⭐ {starCount}
+          </div>
+        ) : null}
+        <button
+          onClick={() => { stop(); onHome && onHome(); }}
+          aria-label="Home"
+          style={{
+            width: 56, height: 56, fontSize: 26, borderRadius: 18,
+            border: '3px solid #d9d4f5', background: '#fff', cursor: 'pointer',
+          }}
+        >🏠</button>
+      </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         {replayText ? (
           <button

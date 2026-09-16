@@ -1,19 +1,13 @@
-// Readiness-check regression tests (node:test, no new dependencies).
-// Run with: npm test  (node --test test/)
+// Readiness v2 regression tests (node:test, no new dependencies).
+// The v2 gate is a two-trial dogfish/fishdog left-to-right order check —
+// spoken + demoed, no QuizStep trial machines (the old architecture's
+// dead-end class is gone by construction).
 //
-// Guards the SEVERE production bug where the readiness check dead-ended on
-// Game 1 question 2 ("Listen: cat … sun"): the three Readiness QuizSteps
-// were never remounted (missing key={trial}), so after question 1 the trial
-// machine stayed done=true and swallowed every tap forever — the instruction
-// said "cat … sun" while the buttons still showed question 1's emojis.
-//
-// Three layers:
-//  1. Structural: every multi-question <QuizStep> in Readiness.jsx carries a
-//     changing key={...} prop so a finished trial can never swallow input.
-//  2. Content: every generated question's choices include its correct answer
-//     id (an unwinnable question is a deterministic dead end by another name).
-//  3. Behavioral: a finished trial machine ignores taps (reproduces the dead
-//     end); a fresh machine per question advances normally.
+// Layers:
+//  1. Placement rule: trackForScore(2) -> 'main', anything less -> 'basics'.
+//  2. Trials: exactly two, dogfish then fishdog, both speakable.
+//  3. Structural: Readiness.jsx has no QuizStep, speaks both trial ids,
+//     and routes onDone through trackForScore.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,116 +15,40 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createTrial } from '../src/lib/quizstep.js';
-import {
-  SEQ_ITEMS, BLEND_ITEMS, INVENTORY_SOUNDS, SEQ_CORRECT_ID,
-  sequenceChoices, blendWordChoices, inventoryChoices, questionIsSound,
-} from '../src/lib/readiness.js';
+import { READINESS_TRIALS, trackForScore } from '../src/lib/readiness2.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const readinessSrc = fs.readFileSync(path.join(here, '../src/components/Readiness.jsx'), 'utf8');
 
-// ---- 1. structural: every QuizStep in Readiness.jsx has a key ----
-test('readiness: every QuizStep remounts per question (key=)', () => {
-  const blocks = readinessSrc.split('<QuizStep');
-  assert.ok(blocks.length > 1, 'no QuizStep found in Readiness.jsx');
-  for (const b of blocks.slice(1)) {
-    const head = b.slice(0, 400);
-    assert.match(head, /key=\{[^}]+\}/, `QuizStep without key prop: ${head.slice(0, 120)}…`);
-  }
+// ---- 1. placement rule ----
+test('readiness v2: 2/2 routes to main track', () => {
+  assert.equal(trackForScore(2), 'main');
 });
 
-// ---- 2. content: correct answer is always among the choices ----
-test('readiness game 1: every sequence question includes its correct answer', () => {
-  assert.ok(SEQ_ITEMS.length >= 2);
-  for (const item of SEQ_ITEMS) {
-    const choices = sequenceChoices(item);
-    assert.equal(choices.length, 2);
-    assert.ok(questionIsSound(choices, SEQ_CORRECT_ID), `unwinnable: ${item.words.join(' ')}`);
-    // The correct choice is the forward order the audio prompts.
-    const fwd = choices.find((c) => c.id === SEQ_CORRECT_ID);
-    assert.equal(fwd.label, item.emoji[0] + item.emoji[1]);
-    assert.equal(fwd.speak, `${item.words[0]} ${item.words[1]}`);
-    // The two options are genuinely different.
-    assert.notEqual(choices[0].label, choices[1].label);
-  }
+test('readiness v2: anything less than 2/2 routes to sounds-only basics', () => {
+  assert.equal(trackForScore(1), 'basics');
+  assert.equal(trackForScore(0), 'basics');
 });
 
-test('readiness game 1: the cat…sun question is winnable', () => {
-  const item = SEQ_ITEMS.find((i) => i.words[0] === 'cat');
-  assert.ok(item, 'cat…sun item missing');
-  const choices = sequenceChoices(item);
-  assert.ok(questionIsSound(choices, SEQ_CORRECT_ID));
-  assert.deepEqual(
-    choices.map((c) => c.label).sort(),
-    ['🐱☀️', '☀️🐱'].sort()
-  );
+// ---- 2. trials ----
+test('readiness v2: exactly two trials, dogfish then fishdog', () => {
+  assert.equal(READINESS_TRIALS.length, 2);
+  assert.equal(READINESS_TRIALS[0].id, 'dogfish');
+  assert.deepEqual(READINESS_TRIALS[0].parts, ['dog', 'fish']);
+  assert.equal(READINESS_TRIALS[1].id, 'fishdog');
+  assert.deepEqual(READINESS_TRIALS[1].parts, ['fish', 'dog']);
 });
 
-test('readiness game 2: every blend question includes the blended word', () => {
-  assert.ok(BLEND_ITEMS.length >= 2);
-  for (const item of BLEND_ITEMS) {
-    const choices = blendWordChoices(item);
-    assert.equal(choices.length, 2);
-    assert.ok(questionIsSound(choices, item.word), `unwinnable: ${item.word}`);
-    assert.notEqual(choices[0].id, choices[1].id);
-  }
+// ---- 3. structural ----
+test('readiness v2: no QuizStep trial machines (dead-end class removed)', () => {
+  assert.doesNotMatch(readinessSrc, /<QuizStep/);
 });
 
-test('readiness game 3: every inventory question includes the target letter', () => {
-  assert.ok(INVENTORY_SOUNDS.length >= 2);
-  for (const g of INVENTORY_SOUNDS) {
-    const distract = INVENTORY_SOUNDS.filter((x) => x !== g).slice(0, 2);
-    const choices = inventoryChoices(g, distract);
-    assert.ok(choices.length >= 3);
-    assert.ok(questionIsSound(choices, g), `unwinnable: ${g}`);
-    assert.ok(choices.some((c) => c.id === 'unsure'), 'not-sure option missing');
-  }
-});
-
-test('readiness: questionIsSound rejects malformed questions', () => {
-  assert.equal(questionIsSound([{ id: 'a' }, { id: 'b' }], 'c'), false);
-  assert.equal(questionIsSound([{ id: 'a' }], 'a'), false); // fewer than 2 choices
-  assert.equal(questionIsSound([], 'a'), false);
-  assert.equal(questionIsSound([{ id: 'a' }, { id: 'c' }], 'c'), true);
-});
-
-// ---- 3. behavioral: finished trial swallows taps; fresh trial advances ----
-test('readiness: a finished trial machine ignores taps (the dead end), a fresh one advances', () => {
-  const q1 = sequenceChoices(SEQ_ITEMS[0]);
-  const stale = createTrial(q1, SEQ_CORRECT_ID);
-  stale.tap(SEQ_CORRECT_ID); // question 1 answered correctly -> done
-  assert.equal(stale.tap(SEQ_CORRECT_ID).kind, 'ignored');
-  assert.equal(stale.tap('bwd').kind, 'ignored');
-
-  // The fix: the parent remounts per question, so question 2 gets a fresh
-  // machine with its OWN choices — the cat…sun answer is tappable.
-  const q2 = sequenceChoices(SEQ_ITEMS[1]);
-  const fresh = createTrial(q2, SEQ_CORRECT_ID);
-  const ev = fresh.tap(SEQ_CORRECT_ID);
-  assert.equal(ev.kind, 'correct');
-});
-
-// ---- readiness resume wiring (reload mid-check offers "Continue check") ----
-const appSrc = fs.readFileSync(path.join(here, '../src/App.jsx'), 'utf8');
-const homeSrc = fs.readFileSync(path.join(here, '../src/components/Home.jsx'), 'utf8');
-
-test('readiness resume: orchestrator accepts initialGame/initialResults/onProgress', () => {
-  assert.match(readinessSrc, /initialGame\s*=\s*0/);
-  assert.match(readinessSrc, /initialResults\s*=\s*\{/);
-  assert.match(readinessSrc, /onProgress/);
-  assert.match(readinessSrc, /useState\(initialGame\)/);
-});
-
-test('readiness resume: App persists position and offers resume before placement', () => {
-  assert.match(appSrc, /saveReadinessProgress/);
-  assert.match(appSrc, /loadReadinessProgress/);
-  assert.match(appSrc, /clearReadinessProgress/);
-  assert.match(appSrc, /beginReadiness/);
-  assert.match(appSrc, /kind: 'readiness'/);
-});
-
-test('readiness resume: Home labels the resume offer honestly', () => {
-  assert.match(homeSrc, /Continue.*'s check/);
-  assert.match(homeSrc, /resume\.kind === 'readiness'/);
+test('readiness v2: speaks each trial by id and routes through trackForScore', () => {
+  // Trial ids are interpolated into fixed templates; the catalog enumerates
+  // every expansion ('Tap dogfish!', 'Tap fishdog!', …).
+  assert.match(readinessSrc, /speak\(`Tap \${t\.id}!`\)/);
+  assert.match(readinessSrc, /Listen: \${t\.parts\[0\]}… \${t\.parts\[1\]}! Try again!/);
+  assert.match(readinessSrc, /trackForScore\(s\)/);
+  assert.match(readinessSrc, /onDone\(\{[^}]*track: trackForScore\(s\)/);
 });

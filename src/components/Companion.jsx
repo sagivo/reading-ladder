@@ -1,13 +1,19 @@
 // Companion picker: finite cosmetic customization (the only reward).
 // Accessories unlock one per completed session — no grinding, no randomness.
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Screen, BigButton, Title, Subtitle } from './ui.jsx';
+import { narrate as speak, stop } from '../lib/narration.js';
 import { COMPANIONS, COMPANION_COLORS, ACCESSORIES } from '../lib/curriculum.js';
 import { companionBg } from './Home.jsx';
 
 export default function Companion({ profile, onChange, onBack }) {
   const c = profile.companion;
+
+  useEffect(() => {
+    stop();
+    speak('Pick your buddy! Tap an animal, then a color. Finish lessons to earn more accessories.');
+  }, []);
 
   function set(patch) {
     onChange({ ...c, ...patch });
@@ -63,12 +69,17 @@ export default function Companion({ profile, onChange, onBack }) {
           return (
             <button
               key={a.id}
-              disabled={!unlocked}
-              onClick={() => set({ accessory: a.id })}
+              // Never dead-disabled: tapping a locked accessory explains how
+              // to earn it instead of silently swallowing the tap.
+              aria-disabled={!unlocked}
+              onClick={() => {
+                if (unlocked) set({ accessory: a.id });
+                else speak('Finish a lesson to earn a new accessory!');
+              }}
               title={a.name}
               style={{
                 width: 84, height: 84, fontSize: 40, borderRadius: 22,
-                cursor: unlocked ? 'pointer' : 'default', background: '#fff',
+                cursor: 'pointer', background: '#fff',
                 border: c.accessory === a.id ? '5px solid #7c5cd6' : '3px solid #e4e0f7',
                 opacity: unlocked ? 1 : 0.4,
               }}

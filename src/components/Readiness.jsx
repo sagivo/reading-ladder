@@ -6,7 +6,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Screen, BigButton, Title, Subtitle, TopBar, ProgressDots, QuizStep, ChoiceButton, randomPraise } from './ui.jsx';
-import { speak, speakSoundsSeparately, stop } from '../lib/speech.js';
+import { narrate as speak, speakSoundsSeparately, stop } from '../lib/narration.js';
 import { SOUNDS } from '../lib/curriculum.js';
 import { parseGraphemes } from '../lib/decodability.js';
 import {
@@ -74,7 +74,9 @@ function BlendGame({ onDone }) {
 
   useEffect(() => {
     stop();
-    speak(`Push one token for each sound you hear. Then tell me the word.`);
+    // Chunked for a 3-year-old: one short direction, then the sounds, then
+    // the next step — never a 12-word breath.
+    speak('Push one token for each sound you hear. Then tap the green button.');
     setTimeout(() => {
       speakSoundsSeparately(item.sounds.map(soundOf));
     }, 1200);
@@ -117,12 +119,12 @@ function BlendGame({ onDone }) {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 14 }}>
-            <BigButton small color="#9a94c7" onClick={() => setTaps(0)}>↺ Start over</BigButton>
+            <BigButton small color="#6f66a8" onClick={() => setTaps(0)}>↺ Start over</BigButton>
             <BigButton small onClick={() => setCounted(true)}>I pushed {taps} ✓</BigButton>
           </div>
           <button
             onClick={() => speakSoundsSeparately(item.sounds.map(soundOf))}
-            style={{ background: 'none', border: 'none', fontSize: 20, color: '#7c5cd6', textDecoration: 'underline', cursor: 'pointer' }}
+            style={{ background: 'none', border: 'none', fontSize: 20, color: '#6f66a8', textDecoration: 'underline', cursor: 'pointer', minHeight: 48, padding: '8px 16px' }}
           >🔁 Play the sounds again</button>
         </>
       ) : (

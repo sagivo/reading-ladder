@@ -41,7 +41,10 @@ export function sequenceChoices(item) {
 }
 
 export function sequenceInstruction(item) {
-  return `Listen: ${item.words[0]} … ${item.words[1]}. Tap what you heard.`;
+  // NOTE: the words must NOT appear in the visible text — the child hears
+  // them via narration; showing them turns a listening task into visual
+  // matching. (item is unused here but kept for API stability.)
+  return 'Listen. Tap what you heard, in order.';
 }
 
 /**

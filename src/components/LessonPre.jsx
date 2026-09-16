@@ -80,7 +80,7 @@ function SameDifferent({ sounds, L, onDone }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22 }}>
       <Subtitle>Same sound? Or different? 👂</Subtitle>
-      <BigButton small color="#9a94c7" onClick={replay}>🔁 Play again</BigButton>
+      <BigButton small color="#6f66a8" onClick={replay}>🔁 Play again</BigButton>
       <div style={{ display: 'flex', gap: 20 }}>
         <ChoiceButton onClick={() => answer(true)}><span style={{ fontSize: 40 }}>👍<br />Same</span></ChoiceButton>
         <ChoiceButton onClick={() => answer(false)}><span style={{ fontSize: 40 }}>👎<br />Different</span></ChoiceButton>
@@ -162,7 +162,9 @@ const SEQ = [
 function OrderGame({ L, onDone }) {
   const [round, setRound] = useState(0);
   const item = SEQ[round];
-  const instruction = `Listen: ${item.words[0]} … ${item.words[1]}. Tap what you heard, in order.`;
+  // The words are spoken (that's the task) but never shown in text — a
+  // visible word list would turn listening into visual matching.
+  const instruction = 'Listen. Tap what you heard, in order.';
 
   useEffect(() => {
     speak(`Last game! Listen. ${item.words[0]}. ${item.words[1]}. Tap what you heard.`);
@@ -177,6 +179,7 @@ function OrderGame({ L, onDone }) {
     <QuizStep
       key={round}
       instruction={instruction}
+      speakInstruction={false}
       choices={choices}
       correctId="fwd"
       onResult={(r) => {

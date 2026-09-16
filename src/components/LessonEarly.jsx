@@ -43,7 +43,9 @@ function ReviewStep({ misses, stage, onDone, L }) {
   const distract = shuffle(
     WORD_BANK.filter((e) => e.w !== miss.ref && e.w.length === miss.ref.length && isDecodable(e.w, taught, PREVIEW_WORDS))
   ).slice(0, 2);
-  const instruction = `Tap the word you hear: ${miss.ref}`;
+  // The target word is spoken (that's the task) but never printed in the
+  // instruction — printing it would turn listening into visual matching.
+  const instruction = 'Tap the word you hear.';
 
   useEffect(() => {
     stop();
@@ -55,6 +57,7 @@ function ReviewStep({ misses, stage, onDone, L }) {
     <QuizStep
       key={i}
       instruction={instruction}
+      speakInstruction={false}
       choices={shuffle([
         { id: miss.ref, label: miss.ref, speak: miss.ref },
         ...distract.map((d) => ({ id: d.w, label: d.w, speak: d.w })),
@@ -79,7 +82,7 @@ function NewSoundStep({ sound, stage, onDone, L }) {
 
   useEffect(() => {
     stop();
-    speak(`Today's new sound. This letter says ${sound.say}, like ${sound.keyword}. Say it with me: ${sound.say}.`);
+    speak(`Today's new sound. This letter says ${sound.say}, like ${sound.keyword}. Say it with me: ${sound.say}. When you can say it, tap the green button.`);
   }, []);
 
   if (phase === 'model') {
@@ -89,7 +92,7 @@ function NewSoundStep({ sound, stage, onDone, L }) {
         <div style={{ fontSize: 72 }}>{sound.emoji}</div>
         <Subtitle>/{sound.say}/ … like “{sound.keyword}”</Subtitle>
         <div style={{ display: 'flex', gap: 14 }}>
-          <BigButton small color="#9a94c7" onClick={() => speakSound(sound)}>🔁 Hear it</BigButton>
+          <BigButton small color="#6f66a8" onClick={() => speakSound(sound)}>🔁 Hear it</BigButton>
           <BigButton small color="#22a06b" onClick={() => setPhase('practice')}>I can say it ✓</BigButton>
         </div>
       </div>
@@ -133,7 +136,7 @@ function BlendStep({ items, stage, onDone, L }) {
     stop();
     setQuizzing(false);
     setActive(-1);
-    speak(`Slide the sounds together. Then say the word fast.`);
+    speak(`Slide the sounds together. Then say the word fast. When you're done, tap: I read it.`);
   }, [i]);
 
   async function slide() {
@@ -168,7 +171,7 @@ function BlendStep({ items, stage, onDone, L }) {
           <BigButton small onClick={slide}>🐌 Slide it</BigButton>
           <BigButton small color="#22a06b" onClick={() => speak(item.word, { rate: 0.9 })}>⚡ Say it fast</BigButton>
         </div>
-        <BigButton small color="#9a94c7" onClick={() => setQuizzing(true)}>I read it ✓</BigButton>
+        <BigButton small color="#6f66a8" onClick={() => setQuizzing(true)}>I read it ✓</BigButton>
       </div>
     );
   }
@@ -298,7 +301,7 @@ function StoryStep({ story, onDone, L }) {
 
   useEffect(() => {
     stop();
-    speak('Now read a real story. Tap each line to hear it, then read it yourself.');
+    speak('Now read a real story. Tap each line to hear it, then read it yourself. Then tap: I read it.');
   }, []);
 
   async function hear(i, text) {
@@ -330,7 +333,15 @@ function StoryStep({ story, onDone, L }) {
             </button>
           ))}
         </div>
-        <BigButton small color="#22a06b" disabled={heard.length < story.sentences.length} onClick={() => setQuizzing(true)}>
+        {/* Never disabled: a greyed-out dead button feels "stuck" to a small
+            child. Tapping early explains what to do instead. */}
+        <BigButton small color="#22a06b" onClick={() => {
+          if (heard.length < story.sentences.length) {
+            speak('Tap each line to hear the story first. Then tap: I read it.');
+            return;
+          }
+          setQuizzing(true);
+        }}>
           I read it ✓
         </BigButton>
       </div>
@@ -375,11 +386,11 @@ export default function LessonEarly({ profile, plan, L, onFinish, onHome, initia
   }, [i]);
   const replay = {
     review: 'Tap the word you hear.',
-    sound: `The letter ${plan.sound.g} says ${plan.sound.say}.`,
-    blend: 'Slide the sounds together, then say the word fast.',
+    sound: `The letter ${plan.sound.g} says ${plan.sound.say}. When you can say it, tap the green button.`,
+    blend: 'Slide the sounds together, then say the word fast. When you are done, tap: I read it.',
     firstsound: `Which one starts with ${plan.sound.say}?`,
     build: `Build the word ${plan.buildWord}. Tap the letters in order.`,
-    story: 'Tap each line to hear the story.',
+    story: 'Tap each line to hear the story. Then tap: I read it.',
   }[step];
 
   // Immediate step transitions: the old 600ms wrapper stacked on top of the

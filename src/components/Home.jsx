@@ -1,11 +1,14 @@
 // Home: profile picker + lesson entry.
 // Kid-facing, but the whole app sits behind the parent's login (App.jsx
 // auth gate), so no kid access is possible without a signed-in parent.
-// Adding/editing readers moved to the parent-only Kids screen.
+// Adding/editing readers is parent-only: the "+ Add a reader" buttons sit
+// behind the grown-up math gate, and the Kids screen itself is reachable
+// only through gated paths (here, or the gated ParentDash).
 
-import React from 'react';
-import { Screen, BigButton, Title, Subtitle } from './ui.jsx';
-import { narrate as speak } from '../lib/narration.js';
+import React, { useState, useEffect } from 'react';
+import { Screen, BigButton, Title, Subtitle, ParentGate } from './ui.jsx';
+import { narrate as speak, isSoundEnabled, setSoundEnabled } from '../lib/narration.js';
+import { didLessonToday } from '../lib/store.js';
 import { COMPANIONS, COMPANION_COLORS, ACCESSORIES } from '../lib/curriculum.js';
 
 export function companionEmoji(c) {
@@ -42,7 +45,7 @@ function ProfileCard({ p, onTap, selected }) {
       </div>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 30, fontWeight: 800 }}>{p.name}</div>
-        <div style={{ fontSize: 18, color: '#5b567d' }}>
+        <div style={{ fontSize: 20, color: '#5b567d' }}>
           {p.track === 'early' ? '📖 Early reader' : p.track === 'pre' ? '👂 Listening reader' : '✨ New reader'}
           {' · '}
           {p.sessions.length} {p.sessions.length === 1 ? 'lesson' : 'lessons'} done
@@ -62,27 +65,76 @@ function ProfileCard({ p, onTap, selected }) {
   );
 }
 
-export default function Home({ profiles, activeId, onSelect, onParent, onManageKids, soundOn, onToggleSound, resumeFor, onResume }) {
+/** "+ Add a reader" is parent business on a kid-facing screen: it opens
+    behind the grown-up math gate so a small child can't wander into
+    reader management (add/edit/archive). */
+function GatedAddReader({ onManageKids, dashed }) {
+  const [gating, setGating] = useState(false);
+  if (gating) {
+    return (
+      <ParentGate
+        onPass={() => { setGating(false); onManageKids(); }}
+        onCancel={() => setGating(false)}
+      />
+    );
+  }
+  if (dashed) {
+    return (
+      <button
+        onClick={() => setGating(true)}
+        style={{
+          padding: 14, borderRadius: 24, border: '4px dashed #b9b3d6', background: 'transparent',
+          fontSize: 22, fontWeight: 700, color: '#7c5cd6', cursor: 'pointer', minHeight: 64,
+        }}
+      >+ Add a reader</button>
+    );
+  }
+  return <BigButton onClick={() => setGating(true)}>+ Add a reader</BigButton>;
+}
+
+export default function Home({ profiles, activeId, onSelect, onParent, onManageKids, resumeFor, onResume }) {
   const active = profiles.find((p) => p.id === activeId);
   const resume = active && resumeFor ? resumeFor(active.id) : null;
+  // One lesson per day: a completed session today replaces the start
+  // button with a friendly boundary (the loop closes; no bingeing).
+  const doneToday = !!(active && !resume && didLessonToday(active));
+  const [soundOn, setSoundOn] = useState(() => isSoundEnabled());
+
+  function toggleSound() {
+    const v = !soundOn;
+    setSoundOn(v);
+    setSoundEnabled(v); // narration.js master switch: MP3s + Web Speech fallback
+  }
+
+  // Audio-first entry: a non-reading child hears what to do on arrival.
+  useEffect(() => {
+    if (profiles.length === 0) {
+      speak('No readers yet. A grown-up can add the first reader.');
+    } else if (active && doneToday) {
+      speak(`All done for today, ${active.name}! Come back tomorrow for a new lesson.`);
+    } else {
+      speak('Tap your picture to pick who is reading.');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Screen>
       <div style={{ width: '100%', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
         <button
-          onClick={onToggleSound}
+          onClick={toggleSound}
           aria-label={soundOn ? 'Sound on' : 'Sound off'}
           aria-pressed={!!soundOn}
           title={soundOn ? 'Sound on' : 'Sound off'}
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
-            padding: '10px 16px', fontSize: 22, borderRadius: 18, cursor: 'pointer',
+            minHeight: 56, padding: '10px 20px', fontSize: 22, borderRadius: 18, cursor: 'pointer',
             border: soundOn ? '3px solid #22a06b' : '3px solid #d9d4f5',
             background: soundOn ? '#e7f7ef' : '#fff', fontWeight: 800, color: '#2b2b3a',
           }}
         >
           <span aria-hidden="true">{soundOn ? '🔊' : '🔇'}</span>
-          <span style={{ fontSize: 17 }}>{soundOn ? 'Sound on' : 'Sound off'}</span>
+          <span style={{ fontSize: 20 }}>{soundOn ? 'Sound on' : 'Sound off'}</span>
         </button>
       </div>
 
@@ -92,7 +144,7 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
       {profiles.length === 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}>
           <Subtitle>No readers yet — a grown-up can add the first reader to begin.</Subtitle>
-          <BigButton onClick={onManageKids}>+ Add a reader</BigButton>
+          <GatedAddReader onManageKids={onManageKids} />
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
@@ -104,17 +156,11 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
               onTap={() => { speak(`Hi ${p.name}!`); onSelect(p.id); }}
             />
           ))}
-          <button
-            onClick={onManageKids}
-            style={{
-              padding: 14, borderRadius: 24, border: '4px dashed #b9b3d6', background: 'transparent',
-              fontSize: 22, fontWeight: 700, color: '#7c5cd6', cursor: 'pointer',
-            }}
-          >+ Add a reader</button>
+          <GatedAddReader onManageKids={onManageKids} dashed />
         </div>
       )}
 
-      {active && (
+      {active && !doneToday && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, marginTop: 8 }}>
           {resume && onResume ? (
             <BigButton
@@ -132,17 +178,30 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
             </BigButton>
           )}
           <Subtitle>{active.track ? 'One lesson a day. About 12 minutes.' : 'A 4-minute game finds your starting spot.'}</Subtitle>
-          <div style={{ fontSize: 16, color: '#7c5cd6', fontWeight: 700 }} aria-live="polite">
+          <div style={{ fontSize: 20, color: '#7c5cd6', fontWeight: 700 }} aria-live="polite">
             ✓ {active.name} is selected
           </div>
+        </div>
+      )}
+
+      {active && doneToday && (
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+          marginTop: 8, background: '#fff', borderRadius: 24, padding: 28,
+          border: '4px solid #d9d4f5', width: '100%', textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 64 }}>🎉</div>
+          <Title>All done for today!</Title>
+          <Subtitle>Come back tomorrow for a new lesson, {active.name}.</Subtitle>
         </div>
       )}
 
       <button
         onClick={onParent}
         style={{
-          marginTop: 24, background: 'none', border: 'none', color: '#9a94c7',
-          fontSize: 18, textDecoration: 'underline', cursor: 'pointer',
+          marginTop: 24, background: 'none', border: 'none', color: '#6f66a8',
+          fontSize: 20, textDecoration: 'underline', cursor: 'pointer',
+          minHeight: 48, padding: '8px 16px',
         }}
       >🔒 Grown-up corner</button>
     </Screen>

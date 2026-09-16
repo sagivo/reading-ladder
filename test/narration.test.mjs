@@ -77,3 +77,23 @@ test('stop() cancels without throwing', async () => {
   N.stop();
   assert.ok(true);
 });
+
+test('mute switch: narrate() is a no-op while muted (MP3 path)', async () => {
+  playedUrls.length = 0;
+  N.setSoundEnabled(true);
+  assert.equal(N.isSoundEnabled(), true);
+  N.setSoundEnabled(false);
+  assert.equal(N.isSoundEnabled(), false);
+  await N.narrate('Hi.');
+  await N.narrateQueue(['One.', 'Two.']);
+  assert.equal(playedUrls.length, 0, 'no MP3 may play while muted');
+  N.setSoundEnabled(true); // restore for other tests
+});
+
+test('mute switch: narrate() plays again after unmuting', async () => {
+  playedUrls.length = 0;
+  N.setSoundEnabled(false);
+  N.setSoundEnabled(true);
+  await N.narrate('Hi.');
+  assert.equal(playedUrls.length, 1, 'unmuting must restore playback');
+});

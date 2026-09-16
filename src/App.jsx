@@ -22,7 +22,7 @@ import LessonPre from './components/LessonPre.jsx';
 import SessionEnd from './components/SessionEnd.jsx';
 import ParentDash from './components/ParentDash.jsx';
 import Companion from './components/Companion.jsx';
-import { Screen, Title, Subtitle } from './components/ui.jsx';
+import { Screen, Title, Subtitle, ParentGate } from './components/ui.jsx';
 import { loadStore, saveStore, touchProfile, queueEvent, loadDismissedClaimIds, saveDismissedClaimIds, mutateStore, clearClaimBlocked } from './lib/store.js';
 import { saveLessonProgress, loadLessonProgress, clearLessonProgress, saveReadinessProgress, loadReadinessProgress, clearReadinessProgress } from './lib/store.js';
 import { mergeOnLaunch, syncNow, onSyncState } from './lib/sync.js';
@@ -30,7 +30,6 @@ import { getMe, logout, listProfiles, isAuthError } from './lib/auth.js';
 import { buildEarlyLesson, buildPreLesson } from './lib/lesson.js';
 import { recordAttempt, newSoundMastery, addMiss, clearMiss, nextTargetIndex, isMastered } from './lib/mastery.js';
 import { SOUNDS, ACCESSORIES } from './lib/curriculum.js';
-import { setSoundEnabled } from './lib/speech.js';
 import { setVoice, DEFAULT_VOICE } from './lib/narration.js';
 import { onPraise, PRAISE_MS } from './lib/praise.js';
 
@@ -93,8 +92,8 @@ export default function App() {
   const [readinessSaved, setReadinessSaved] = useState(null); // { game, results } | null
   const [summary, setSummary] = useState(null);
   const [sessionStart, setSessionStart] = useState(0);
-  const [soundOn, setSoundOn] = useState(true);
   const [newAccessory, setNewAccessory] = useState(null);
+  const [kidsGate, setKidsGate] = useState(false); // grown-up check before reader management
 
   function setParentBoth(p) {
     parentRef.current = p;
@@ -514,13 +513,7 @@ export default function App() {
           activeId={activeId}
           onSelect={selectProfile}
           onParent={() => setScreen('parent')}
-          onManageKids={() => setScreen('kids')}
-          soundOn={soundOn}
-          onToggleSound={() => {
-            const v = !soundOn;
-            setSoundOn(v);
-            setSoundEnabled(v);
-          }}
+          onManageKids={() => { setKidsGate(false); setScreen('kids'); }}
           resumeFor={resumeInfoFor}
           onResume={(id) => {
             const p = store.profiles[id];
@@ -532,7 +525,15 @@ export default function App() {
           }}
         />
       )}
-      {screen === 'kids' && (
+      {screen === 'kids' && !kidsGate && (
+        <Screen>
+          <ParentGate
+            onPass={() => setKidsGate(true)}
+            onCancel={() => setScreen('home')}
+          />
+        </Screen>
+      )}
+      {screen === 'kids' && kidsGate && (
         <Kids
           store={store}
           commit={commit}
@@ -595,7 +596,7 @@ export default function App() {
           onBack={goHome}
           parent={parent}
           onLogout={doLogout}
-          onManageKids={() => setScreen('kids')}
+          onManageKids={() => { setKidsGate(true); setScreen('kids'); }} // already past the parent math gate
           onClaimUnclaimed={reclaimUnclaimed}
           onSessionExpired={handleSessionExpired}
           // Re-read the store from localStorage after a sync run settles:

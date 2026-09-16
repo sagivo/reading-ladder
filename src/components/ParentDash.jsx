@@ -39,7 +39,7 @@ function Gate({ onPass, onCancel }) {
       <div aria-live="polite" style={{ minHeight: 30, fontSize: 19, fontWeight: 700, color: '#5b567d', visibility: missed ? 'visible' : 'hidden' }}>
         Not quite — try again.
       </div>
-      <button onClick={onCancel} style={{ background: 'none', border: 'none', color: '#9a94c7', fontSize: 18, textDecoration: 'underline', cursor: 'pointer' }}>Back</button>
+      <button onClick={onCancel} style={{ background: 'none', border: 'none', color: '#6f66a8', fontSize: 20, textDecoration: 'underline', cursor: 'pointer', minHeight: 48, padding: '8px 16px' }}>Back</button>
     </Screen>
   );
 }
@@ -134,7 +134,7 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
   return (
     <Screen>
       <div style={{ width: '100%', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <BigButton small color="#9a94c7" onClick={onBack}>‹ Back</BigButton>
+        <BigButton small color="#6f66a8" onClick={onBack}>‹ Back</BigButton>
         <BigButton small onClick={onManageKids}>👥 Manage kids</BigButton>
         <div style={{ flex: 1 }} />
         <BigButton small color="#b0655a" onClick={onLogout}>🚪 Log out</BigButton>
@@ -183,6 +183,24 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
       <Title>{p.avatar} {p.name} <span style={{ fontSize: 20, fontWeight: 600, color: '#5b567d' }}>
         ({p.track === 'early' ? 'early reader' : p.track === 'pre' ? 'listening reader' : 'not placed yet'})
       </span></Title>
+
+      {p.placement && (
+        <Card title="🧭 Placement results (from the 4-minute readiness game)">
+          <div style={{ fontSize: 17, lineHeight: 1.7 }}>
+            <div>👂 Sound order: <b>{p.placement.seq}/2</b></div>
+            <div>🗣️ Sound blending: <b>{p.placement.blend}/2</b></div>
+            <div>🔤 Letter sounds: <b>{p.placement.letters}/5</b></div>
+            {p.placement.reasons && p.placement.reasons.length > 0 && (
+              <div style={{ color: '#5b567d', marginTop: 6 }}>
+                {p.placement.reasons.map((r, i) => <div key={i}>• {r}</div>)}
+              </div>
+            )}
+            {p.placement.overridden && (
+              <div style={{ color: '#5b567d', marginTop: 6 }}>Track set by a grown-up (not the game).</div>
+            )}
+          </div>
+        </Card>
+      )}
 
       <Card title="🔄 Sync status">
         <div style={{ fontSize: 19 }}>{syncLabel}</div>

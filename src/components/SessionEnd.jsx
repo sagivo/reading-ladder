@@ -3,7 +3,7 @@
 
 import React, { useEffect } from 'react';
 import { Screen, BigButton, Title, Subtitle } from './ui.jsx';
-import { speak, stop } from '../lib/speech.js';
+import { narrate as speak, stop } from '../lib/narration.js';
 import { SOUNDS, ACCESSORIES } from '../lib/curriculum.js';
 import { companionEmoji, companionBg } from './Home.jsx';
 
@@ -15,7 +15,13 @@ export default function SessionEnd({ profile, summary, unlockedAccessory, onDone
     const bits = [];
     if (summary.newSound) bits.push(`You learned the sound ${sound ? sound.say : summary.newSound}.`);
     if (summary.wordsRead) bits.push(`You read ${summary.wordsRead} words.`);
-    speak(`All done, ${profile.name}! ` + bits.join(' ') + ' Time for a real-world mission.');
+    if (summary.soundMastered) bits.push('You mastered a sound!');
+    // The offline mission is the loop-closer: it must be SPOKEN, not just
+    // shown — a pre-reader can never read it off the screen.
+    const missionBit = summary.mission
+      ? ` Time for a real-world mission. ${summary.mission} Tell a grown-up when you've done it.`
+      : '';
+    speak(`All done, ${profile.name}! ` + bits.join(' ') + missionBit + ' Tap Done to finish.');
   }, []);
 
   const acc = ACCESSORIES.find((a) => a.id === unlockedAccessory);
@@ -43,7 +49,7 @@ export default function SessionEnd({ profile, summary, unlockedAccessory, onDone
           padding: '14px 22px', fontSize: 22, fontWeight: 700, textAlign: 'center',
         }}>
           🎁 New for your buddy: {acc.emoji} {acc.name}!
-          <div><button onClick={onCompanion} style={{ background: 'none', border: 'none', color: '#7c5cd6', fontSize: 19, textDecoration: 'underline', cursor: 'pointer' }}>Try it on</button></div>
+          <div><button onClick={onCompanion} style={{ background: 'none', border: 'none', color: '#6f66a8', fontSize: 20, textDecoration: 'underline', cursor: 'pointer', minHeight: 48, padding: '8px 16px' }}>Try it on</button></div>
         </div>
       )}
 
@@ -53,7 +59,7 @@ export default function SessionEnd({ profile, summary, unlockedAccessory, onDone
       }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: '#7c5cd6', marginBottom: 8 }}>🌍 OFFLINE MISSION</div>
         <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.4 }}>{summary.mission}</div>
-        <div style={{ fontSize: 18, color: '#5b567d', marginTop: 8 }}>Tell a grown-up when you've done it.</div>
+        <div style={{ fontSize: 20, color: '#5b567d', marginTop: 8 }}>Tell a grown-up when you've done it.</div>
       </div>
 
       <BigButton color="#22a06b" onClick={() => { stop(); onDone(); }}>

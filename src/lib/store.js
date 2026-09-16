@@ -256,3 +256,19 @@ export function clearReadinessProgress(profileId) {
     /* ignore */
   }
 }
+
+/**
+ * Session boundary: one completed lesson per calendar day per reader.
+ * p.sessions entries carry { at: ISO string } (App.finishLesson). Only
+ * COMPLETED lessons count — an in-progress lesson still offers "Continue".
+ * Local device date: the boundary a family actually lives by.
+ */
+export function didLessonToday(profile) {
+  if (!profile || !Array.isArray(profile.sessions)) return false;
+  const today = new Date().toDateString();
+  return profile.sessions.some((s) => {
+    if (!s || !s.at) return false;
+    const d = new Date(s.at);
+    return !isNaN(d) && d.toDateString() === today;
+  });
+}

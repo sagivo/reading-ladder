@@ -24,6 +24,7 @@ globalThis.localStorage = {
 const {
   loadStore, saveStore, mutateStore, newProfile,
   saveReadinessProgress, loadReadinessProgress, clearReadinessProgress,
+  didLessonToday,
 } = await import('../src/lib/store.js');
 
 test('mutateStore: localStorage reflects the mutation synchronously', () => {
@@ -73,4 +74,24 @@ test('readiness progress: malformed entries are rejected', () => {
   mem.clear();
   mem.set('reading-ladder-readiness-v1', JSON.stringify({ kid1: { game: 'x' } }));
   assert.equal(loadReadinessProgress('kid1'), null);
+});
+
+test('didLessonToday: no sessions means the start button stays', () => {
+  assert.equal(didLessonToday({ sessions: [] }), false);
+  assert.equal(didLessonToday({}), false);
+  assert.equal(didLessonToday(null), false);
+});
+
+test('didLessonToday: a session completed today blocks a second lesson', () => {
+  assert.equal(didLessonToday({ sessions: [{ at: new Date().toISOString() }] }), true);
+});
+
+test('didLessonToday: yesterday\'s session does not block today\'s lesson', () => {
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  assert.equal(didLessonToday({ sessions: [{ at: yesterday }] }), false);
+});
+
+test('didLessonToday: malformed session entries never block', () => {
+  assert.equal(didLessonToday({ sessions: [null, {}, { at: 'not-a-date' }] }), false);
+  assert.equal(didLessonToday({ sessions: 'oops' }), false);
 });

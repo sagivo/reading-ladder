@@ -3,7 +3,7 @@
 // (here: much bigger), replay always visible, audio instruction + visual demo.
 
 import React, { useState, useRef, useEffect } from 'react';
-import { narrate as speak, narrateQueue, stop, replayLast } from '../lib/narration.js';
+import { narrate as speak, narrateQueue, stop, replayLast, isSoundEnabled, setSoundEnabled } from '../lib/narration.js';
 import { celebrate } from '../lib/praise.js';
 import { createTrial } from '../lib/quizstep.js';
 
@@ -84,10 +84,16 @@ export function ProgressDots({ total, done }) {
 }
 
 /**
- * Top bar: small home button (top-left) + always-visible replay button.
- * Replay re-speaks the current instruction.
+ * Top bar: small home button (top-left) + always-visible replay button
+ * and sound toggle (top-right). Replay re-speaks the current instruction.
  */
 export function TopBar({ onHome, replayText, replayLabel = '🔁 Hear it again' }) {
+  const [on, setOn] = useState(() => isSoundEnabled());
+  function toggle() {
+    const v = !on;
+    setOn(v);
+    setSoundEnabled(v);
+  }
   return (
     <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
       <button
@@ -98,16 +104,69 @@ export function TopBar({ onHome, replayText, replayLabel = '🔁 Hear it again' 
           border: '3px solid #d9d4f5', background: '#fff', cursor: 'pointer',
         }}
       >🏠</button>
-      {replayText ? (
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        {replayText ? (
+          <button
+            onClick={() => replayLast()}
+            style={{
+              minHeight: 56, padding: '8px 20px', fontSize: 20, fontWeight: 700,
+              borderRadius: 18, border: '3px solid #7c5cd6', background: '#fff',
+              color: '#7c5cd6', cursor: 'pointer',
+            }}
+          >{replayLabel}</button>
+        ) : null}
         <button
-          onClick={() => replayLast()}
+          onClick={toggle}
+          aria-label={on ? 'Sound on' : 'Sound off'}
+          aria-pressed={!!on}
+          title={on ? 'Sound on' : 'Sound off'}
           style={{
-            minHeight: 56, padding: '8px 20px', fontSize: 20, fontWeight: 700,
-            borderRadius: 18, border: '3px solid #7c5cd6', background: '#fff',
-            color: '#7c5cd6', cursor: 'pointer',
+            width: 56, height: 56, fontSize: 26, borderRadius: 18, cursor: 'pointer',
+            border: on ? '3px solid #22a06b' : '3px solid #d9d4f5',
+            background: on ? '#e7f7ef' : '#fff',
           }}
-        >{replayLabel}</button>
-      ) : <div style={{ width: 56 }} />}
+        >{on ? '🔊' : '🔇'}</button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Grown-up gate: a small arithmetic question a preschooler can't answer
+ * (and can't reliably guess repeatedly). Used before any parent-only
+ * screen reachable from a kid-facing surface.
+ */
+export function ParentGate({ onPass, onCancel }) {
+  const [a] = useState(4 + Math.floor(Math.random() * 5));
+  const [b] = useState(3 + Math.floor(Math.random() * 5));
+  const [missed, setMissed] = useState(false);
+  const answer = a + b;
+  const options = [answer - 1, answer, answer + 1].sort(() => Math.random() - 0.5);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+      <Title>🔒 Grown-ups only</Title>
+      <Subtitle>What is {a} + {b}?</Subtitle>
+      <div style={{ display: 'flex', gap: 12 }}>
+        {options.map((o) => (
+          <ChoiceButton
+            key={o}
+            onClick={() => {
+              if (o === answer) { onPass(); return; }
+              setMissed(true);
+              speak('Try again, grown-up.');
+            }}
+          >
+            <span style={{ fontSize: 36 }}>{o}</span>
+          </ChoiceButton>
+        ))}
+      </div>
+      <div aria-live="polite" style={{ minHeight: 30, fontSize: 20, fontWeight: 700, color: '#5b567d', visibility: missed ? 'visible' : 'hidden' }}>
+        Not quite — try again.
+      </div>
+      <button
+        onClick={onCancel}
+        style={{ background: 'none', border: 'none', color: '#6f66a8', fontSize: 20, textDecoration: 'underline', cursor: 'pointer', minHeight: 48, padding: '8px 16px' }}
+      >Back</button>
     </div>
   );
 }

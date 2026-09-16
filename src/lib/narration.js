@@ -17,7 +17,7 @@
 //      narrateParts for composed utterances, stop(), preload(texts),
 //      onStatus(cb) for the parent audio indicator.
 
-import { speak as webSpeak, stop as webStop } from './speech.js';
+import { speak as webSpeak, stop as webStop, setSoundEnabled as setWebSoundEnabled } from './speech.js';
 
 export const VOICES = {
   sarah: { label: 'Sarah', hint: 'Warm feminine voice' },
@@ -39,6 +39,21 @@ let currentAudio = null;
 let generation = 0;
 let lastSpoken = null; // text | string[] — what replayLast() re-plays
 const statusListeners = new Set();
+
+// Master sound switch (the 🔊 toggle). When off, narrate()/narrateQueue()
+// are no-ops and any in-flight audio stops — this covers the MP3 path AND
+// the Web Speech fallback (speech.js has its own flag, synced below).
+let narrationEnabled = true;
+/** Mute or unmute all narration. */
+export function setSoundEnabled(v) {
+  narrationEnabled = !!v;
+  setWebSoundEnabled(narrationEnabled);
+  if (!narrationEnabled) stop();
+}
+/** Current mute state (for initializing toggle buttons). */
+export function isSoundEnabled() {
+  return narrationEnabled;
+}
 
 // Narration hold: after a celebration, the next question's instruction
 // waits instead of cutting the praise audio off mid-word. Set by
@@ -155,6 +170,7 @@ async function playClip(text, voice, opts = {}) {
 
 /** Speak one string. Cancels anything currently playing first. */
 export async function narrate(text, opts = {}) {
+  if (!narrationEnabled) return;
   // Respect a celebration hold: wait (briefly) instead of cutting praise off.
   const gen0 = generation;
   const wait = holdUntil - Date.now();
@@ -175,6 +191,7 @@ export async function narrate(text, opts = {}) {
  * All parts are pre-generated; this never synthesizes.
  */
 export async function narrateQueue(texts, opts = {}) {
+  if (!narrationEnabled) return;
   const gen0 = generation;
   const wait = holdUntil - Date.now();
   if (wait > 0 && !opts.ignoreHold) {
@@ -222,9 +239,11 @@ export function speakSound(say) {
   return narrate(text);
 }
 
-/** Speak sounds one at a time (blending preparation). */
+/** Speak sounds one at a time (blending preparation).
+ * Accepts sound objects ({say}) or raw strings — callers pass both. */
 export function speakSoundsSeparately(sounds, opts = {}) {
-  return narrateQueue(sounds, opts);
+  const texts = (sounds || []).map((s) => (s && typeof s === 'object' ? s.say || s.g || '' : s));
+  return narrateQueue(texts, opts);
 }
 
 /** narrate with a slower fallback rate (MP3 path plays at natural pace). */

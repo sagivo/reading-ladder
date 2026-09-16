@@ -281,15 +281,33 @@ export function QuizStep({ instruction, choices, correctId, onResult, speakInstr
       <Subtitle>{instruction}</Subtitle>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
         {visible.map((c) => (
-          <ChoiceButton
-            key={c.id}
-            onClick={() => handleTap(c)}
-            highlight={st.modeled && c.id === correctId}
-            dimmed={st.done && c.id !== correctId}
-          >
-            {c.label}
-            {c.sub ? <div style={{ fontSize: 20, fontWeight: 600 }}>{c.sub}</div> : null}
-          </ChoiceButton>
+          // Relative wrapper: the speaker is a sibling of the choice button
+          // (never nested inside it), so hearing a choice never answers it.
+          <div key={c.id} style={{ position: 'relative' }}>
+            <ChoiceButton
+              onClick={() => handleTap(c)}
+              highlight={st.modeled && c.id === correctId}
+              dimmed={st.done && c.id !== correctId}
+            >
+              {c.label}
+              {c.sub ? <div style={{ fontSize: 20, fontWeight: 600 }}>{c.sub}</div> : null}
+            </ChoiceButton>
+            {/* Audio-first for pre-readers: tap the speaker to hear what the
+                card says, without answering. Critical for word/picture
+                choices a non-reading 3-year-old can't decode visually. */}
+            <button
+              aria-label={`Hear: ${c.speak || c.label}`}
+              onClick={() => speak(c.speak || c.label)}
+              style={{
+                position: 'absolute', top: -14, right: -14, width: 52, height: 52,
+                borderRadius: '50%', border: '3px solid #7c5cd6', background: '#fff',
+                fontSize: 24, cursor: 'pointer', lineHeight: 1,
+                boxShadow: '0 2px 8px rgba(80,60,160,0.25)',
+              }}
+            >
+              🔊
+            </button>
+          </div>
         ))}
       </div>
       <div

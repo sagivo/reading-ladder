@@ -53,7 +53,7 @@ function PraiseOverlay() {
   if (!text) return null;
   return (
     <div style={{
-      position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)',
+      position: 'fixed', bottom: 32, left: '50%', transform: 'translateX(-50%)',
       zIndex: 9999, background: '#fff7d6', border: '4px solid #f5b301',
       borderRadius: 24, padding: '12px 28px', fontSize: 30, fontWeight: 800,
       color: '#2d2a45', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',

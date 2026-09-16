@@ -14,19 +14,17 @@ import { loadStore, newProfile, touchProfile, queueEvent } from '../lib/store.js
 
 const AVATARS = ['🦊', '🐰', '🦉', '🐢', '🐵', '🐼', '🐯', '🦁', '🐸', '🐙', '🦄', '🐝'];
 
-function validBirthYear(by) {
-  if (!/^\d{4}$/.test(by)) return false;
-  const y = parseInt(by, 10);
-  const now = new Date().getFullYear();
-  return y >= now - 18 && y <= now;
+function validAge(a) {
+  if (!/^\d{1,2}$/.test(a)) return false;
+  const n = parseInt(a, 10);
+  return n >= 0 && n <= 18;
 }
 
 /** 'early' | 'pre' | null — a suggestion only; the readiness game still decides. */
-function suggestionFor(birthYear) {
-  const by = (birthYear || '').trim();
-  if (!validBirthYear(by)) return null;
-  const age = new Date().getFullYear() - parseInt(by, 10);
-  return age >= 4 ? 'early' : 'pre';
+function suggestionFor(age) {
+  const a = (age || '').trim();
+  if (!validAge(a)) return null;
+  return parseInt(a, 10) >= 4 ? 'early' : 'pre';
 }
 
 const inputStyle = {
@@ -37,11 +35,11 @@ const inputStyle = {
 function KidForm({ initial, submitLabel, busy, onSubmit, onCancel }) {
   const [name, setName] = useState(initial.name || '');
   const [avatar, setAvatar] = useState(initial.avatar || AVATARS[0]);
-  const [birthYear, setBirthYear] = useState(
-    initial.birthYear ? String(initial.birthYear) : String(new Date().getFullYear() - 4)
+  const [age, setAge] = useState(
+    initial.birthYear ? String(new Date().getFullYear() - initial.birthYear) : '4'
   );
   const [formError, setFormError] = useState(null);
-  const suggestion = suggestionFor(birthYear);
+  const suggestion = suggestionFor(age);
 
   function handleSubmit() {
     const n = name.trim();
@@ -49,13 +47,16 @@ function KidForm({ initial, submitLabel, busy, onSubmit, onCancel }) {
       setFormError('Give the reader a name.');
       return;
     }
-    const by = birthYear.trim();
-    if (by && !validBirthYear(by)) {
-      setFormError('Birth year is a 4-digit year, e.g. 2021.');
+    const a = age.trim();
+    if (a && !validAge(a)) {
+      setFormError('Age is a number from 0 to 18.');
       return;
     }
     setFormError(null);
-    onSubmit({ name: n, avatar, birthYear: by ? parseInt(by, 10) : null });
+    // Storage still keeps a birth year (schema + sync unchanged); the form
+    // just asks for age so the parent never has to compute a year.
+    const birthYear = a ? new Date().getFullYear() - parseInt(a, 10) : null;
+    onSubmit({ name: n, avatar, birthYear });
   }
 
   return (
@@ -84,15 +85,15 @@ function KidForm({ initial, submitLabel, busy, onSubmit, onCancel }) {
         ))}
       </div>
       <input
-        value={birthYear}
-        onChange={(e) => setBirthYear(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
-        placeholder="Birth year (optional)"
+        value={age}
+        onChange={(e) => setAge(e.target.value.replace(/[^0-9]/g, '').slice(0, 2))}
+        placeholder="Age (optional)"
         inputMode="numeric"
-        maxLength={4}
+        maxLength={2}
         style={{ ...inputStyle, textAlign: 'center' }}
       />
       <div style={{ fontSize: 15, color: '#9a94c7', textAlign: 'center', marginTop: -8 }}>
-        Birth year is only used to suggest a starting track.
+        Age is only used to suggest a starting track.
       </div>
       {suggestion && (
         <div style={{

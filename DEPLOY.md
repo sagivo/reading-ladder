@@ -1,7 +1,45 @@
 # Deploying The Reading Ladder to Cloudflare
 
-Target: **Cloudflare Pages** (static app + Pages Functions) with a **D1** database.
+Target: **Cloudflare Pages** (static app + API) with a **D1** database.
 Deployment is performed by a separate deploy step — this file is its runbook.
+
+## 0. Direct Upload + Advanced Mode (read this first)
+
+This project is a **Direct Upload** Pages project (not Git-integrated), so
+Pages does **not** compile the `functions/` directory. Instead the API is
+shipped as an **Advanced Mode** worker bundle:
+
+- `npm run build` runs Vite (static assets → `dist/`) **and** esbuild
+  (`npm run build:worker`), which bundles `worker-src/entry.js` →
+  `dist/_worker.js`.
+- `worker-src/entry.js` is a small router: `/api/*` requests are served by
+  the bundled API code (same handlers as `functions/`); everything else is
+  served from static assets via `env.ASSETS.fetch(request)`.
+- `dist/` is gitignored — the bundle is a build artifact. Keep
+  `worker-src/entry.js` in sync with `functions/` when API code changes
+  (both are plain modules; entry.js re-exports the route handlers).
+- The deploy step uploads via the Pages Direct Upload API:
+  1. Hash each file in `dist/` (except `_worker.js`) with wrangler's
+     `hashFile` scheme: `BLAKE3(base64(file bytes) + extension)` as hex,
+     truncated to 32 chars. (Plain SHA-256 hashes upload fine but the
+     asset server cannot serve them — you get empty 500s from
+     `env.ASSETS.fetch`.)
+  2. `POST /pages/assets/check-missing` → `POST /pages/assets/upload`
+     (body = the **raw JSON array** of file records, not `{"files": [...]}`)
+     → `POST /pages/assets/upsert-hashes`, all with the JWT from
+     `GET /accounts/{id}/pages/projects/{project}/upload-token`.
+  3. `POST /pages/projects/{project}/deployments` (multipart): `manifest`
+     = JSON object mapping `/`-prefixed paths → hashes (leading slash
+     required, matching wrangler), plus the `_worker.bundle` part
+     (multipart field `"_worker.bundle"`, filename `_worker.js`, containing
+     a zip whose entries are `_worker.js` and `_worker.bundle` metadata
+     JSON with `main_module: "_worker.js"`).
+  4. The D1 `DB` binding must already be attached to the project (see §3);
+     the bundle reads it via `env.DB`, and `env.ASSETS` is provided
+     automatically in Advanced Mode.
+- A reference implementation of this flow lives in
+  `scripts/deploy_pages.py` (needs `blake3` and the Cloudflare API
+  credentials used by the deploy step).
 
 ## 1. Build settings (Pages project)
 

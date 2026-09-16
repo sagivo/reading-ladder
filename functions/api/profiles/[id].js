@@ -62,7 +62,10 @@ export async function onRequestPut({ request, params, env }) {
     const profile = { updated_at: now, created_at: existing.created_at };
     for (const c of PROFILE_COLS) {
       if (c === 'id') continue;
-      profile[c] = body[c] ?? null;
+      // Merge with the stored row: the caller may send full state (sync) or a
+      // partial update ({ archived } from the archive flow). Never null out
+      // columns the caller didn't send.
+      profile[c] = body[c] !== undefined ? body[c] : existing[c];
     }
     profile.id = params.id;
     await d.prepare(UPSERT_PROFILE_SQL).bind(...profileParams(profile)).run();

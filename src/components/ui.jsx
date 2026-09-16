@@ -159,6 +159,13 @@ export function QuizStep({ instruction, choices, correctId, onResult, speakInstr
 
   // Speak the instruction when the question appears (audio-first for pre-readers).
   useEffect(() => {
+    // Content invariant: an unwinnable question (correct answer not among
+    // the choices) must never render silently — it once dead-ended a game.
+    if (!shuffled.some((c) => c && c.id === correctId)) {
+      console.error(
+        `QuizStep: correctId "${correctId}" is not among the choices — this question can never be answered correctly.`
+      );
+    }
     if (speakInstruction && instruction) {
       speak(instruction);
     }

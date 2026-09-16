@@ -60,7 +60,7 @@ function Card({ title, children }) {
   );
 }
 
-function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSetVoice, onBack, store, refreshSync, parent, onLogout, onManageKids, onSessionExpired }) {
+function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSetVoice, onBack, store, refreshSync, parent, onLogout, onManageKids, onSessionExpired, onClaimUnclaimed }) {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(null);
   const [confirmTrack, setConfirmTrack] = useState(false);
@@ -87,6 +87,9 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
   async function doSync() {
     setSyncing(true);
     setSyncError(null);
+    // Let the 'Syncing…' state paint before the (possibly instant) sync
+    // runs — otherwise the spinner batches away and the button feels dead.
+    await new Promise((r) => setTimeout(r, 60));
     try {
       await syncNow(true); // manual tap always forces, bypassing backoff
     } catch (e) {
@@ -106,17 +109,19 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
   // said "📴 Offline — N events waiting" for ANY pending count, which hid
   // real server errors (and once hid a D1 500) behind a connectivity story.
   const pendingN = sync.pending || 0;
+  const unclaimedN = sync.unclaimedPending || 0;
   const pendingBit = pendingN > 0 ? ` (${pendingN} waiting)` : '';
   const syncLabel =
     sync.state === 'auth' ? '🔒 Signed out — please sign in again' :
     sync.state === 'syncing' || syncing ? '🔄 Syncing…' :
+    sync.state === 'unclaimed' ? `📦 ${unclaimedN} change${unclaimedN === 1 ? '' : 's'} waiting — add the reader${unclaimedN === 1 ? '' : 's'} to your account to sync` :
     sync.state === 'server_error' ? `⚠️ Couldn't sync just now — progress is safe on this device${pendingBit}` :
     sync.state === 'offline' ? `📴 Offline — will sync when connected${pendingBit}` :
     pendingN > 0 ? `⏳ ${pendingN} change${pendingN === 1 ? '' : 's'} waiting to sync` :
     sync.lastSyncAt ? '✅ Synced' :
     '⏳ Waiting for first sync';
 
-  const shownError = syncError || (sync.state !== 'auth' ? sync.error : null);
+  const shownError = syncError || (sync.state !== 'auth' && sync.state !== 'unclaimed' ? sync.error : null);
 
   return (
     <Screen>
@@ -174,6 +179,14 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
       <Card title="🔄 Sync status">
         <div style={{ fontSize: 19 }}>{syncLabel}</div>
         {shownError && <div style={{ fontSize: 16, color: '#a33', marginTop: 6 }}>{shownError}</div>}
+        {(sync.state === 'unclaimed' || unclaimedN > 0) && (
+          <div style={{ marginTop: 10 }}>
+            <BigButton small onClick={onClaimUnclaimed}>📦 Add to my account</BigButton>
+            <div style={{ fontSize: 15, color: '#5b567d', marginTop: 6 }}>
+              These readers live on this device only. Adding them syncs their progress to your account.
+            </div>
+          </div>
+        )}
         {sync.deadLetter && sync.deadLetter.length > 0 && (
           <div style={{ fontSize: 16, color: '#a33', marginTop: 6 }}>
             ⚠️ {sync.deadLetter.length} change{sync.deadLetter.length === 1 ? '' : 's'} couldn't be saved

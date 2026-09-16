@@ -255,3 +255,68 @@ test('client: backoff defers automatic retries, force bypasses', async () => {
   await syncNow(true); // manual "Sync now" -> forces
   assert.equal(calls, 2);
 });
+
+// ---------------------------------------------------------------- unclaimed
+function seedUnclaimed(eventIds) {
+  mem.clear();
+  const store = loadStore();
+  const p = newProfile('DeviceKid', '🦊');
+  p.id = 'p9';
+  p.claimed = false; // reader not yet added to the parent account
+  store.profiles.p9 = p;
+  for (const id of eventIds) queueEvent(store, 'p9', 'trial', { id });
+  store.queue.forEach((e, i) => { e.id = eventIds[i]; });
+  saveStore(store);
+  return store;
+}
+
+test('client: unclaimed events are labeled honestly, never silently stall', async () => {
+  seedUnclaimed(['u1', 'u2']);
+  let calls = 0;
+  fetchHandler = async () => { calls++; return jsonRes({ acked: [], failed: [] }); };
+  const r = await syncNow(true); // manual "Sync now" must still attempt
+  assert.equal(calls, 0, 'no network call — nothing syncable');
+  assert.equal(r.unclaimedPending, 2);
+  assert.deepEqual(queueIds(), ['u1', 'u2'], 'events kept on device');
+  const st = getSyncState();
+  assert.equal(st.state, 'unclaimed');
+  assert.match(st.error, /not yet added to your account/);
+  assert.notEqual(st.state, 'syncing');
+});
+
+test('client: after claiming, the backlog drains normally', async () => {
+  seedUnclaimed(['u1']);
+  await syncNow(true);
+  assert.equal(getSyncState().state, 'unclaimed');
+  // Parent claims the reader (claim flow) — now the events are syncable.
+  const s = loadStore();
+  s.profiles.p9.claimed = true;
+  saveStore(s);
+  fetchHandler = async () => jsonRes({ acked: ['u1'], failed: [] });
+  const r = await syncNow(true);
+  assert.equal(r.ok, true);
+  assert.deepEqual(queueIds(), []);
+  assert.equal(getSyncState().state, 'idle');
+});
+
+test('client: mixed queue — syncable failures stay honest, unclaimed stay visible', async () => {
+  mem.clear();
+  const store = loadStore();
+  const ok = newProfile('Claimed', '🦊');
+  ok.id = 'p1'; ok.claimed = true;
+  const dev = newProfile('Device', '🦊');
+  dev.id = 'p9'; dev.claimed = false;
+  store.profiles.p1 = ok;
+  store.profiles.p9 = dev;
+  queueEvent(store, 'p1', 'trial', {}); store.queue[0].id = 's1';
+  queueEvent(store, 'p9', 'trial', {}); store.queue[1].id = 'u1';
+  saveStore(store);
+  fetchHandler = async () => jsonRes({ error: 'internal error' }, 500);
+  const r = await syncNow(true);
+  assert.equal(r.ok, false);
+  const st = getSyncState();
+  assert.equal(st.state, 'server_error', 'syncable failure is honest');
+  assert.match(st.error, /internal error/);
+  assert.equal(st.unclaimedPending, 1, 'unclaimed count still surfaced');
+  assert.deepEqual(queueIds().sort(), ['s1', 'u1']);
+});

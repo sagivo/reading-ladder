@@ -187,20 +187,57 @@ export function syncNow(force = false) {
   return inflight;
 }
 
+/** Honest label for events that can't sync because their reader is unclaimed. */
+function unclaimedMessage(n) {
+  return (
+    `${n} change${n === 1 ? '' : 's'} belong${n === 1 ? 's' : ''} to reader${n === 1 ? '' : 's'}` +
+    ` not yet added to your account — they stay on this device until claimed.`
+  );
+}
+
 async function doSyncNow(force) {
   const store = loadStore();
   dropDeadLettered(store, getSyncState());
   const byProfile = {};
+  let unclaimedPending = 0;
   for (const ev of store.queue) {
     const p = store.profiles[ev.profile_id];
-    if (p && !p.claimed) continue; // not this parent's (yet) — stays local until adopted
+    if (p && !p.claimed) {
+      // Not this parent's (yet) — stays local until adopted. This used to be
+      // skipped SILENTLY: the dashboard sat on "N changes waiting to sync"
+      // forever with a dead "Sync now" button and no explanation. Now the
+      // count is surfaced and the terminal state is an honest 'unclaimed'.
+      unclaimedPending++;
+      continue;
+    }
     (byProfile[ev.profile_id] = byProfile[ev.profile_id] || []).push(ev);
   }
   const st = getSyncState();
   if (!Object.keys(byProfile).length) {
-    setSyncState({ state: 'idle', pending: store.queue.length, error: null });
+    const pending = store.queue.length;
+    if (unclaimedPending > 0) {
+      setSyncState({
+        ...st,
+        state: 'unclaimed',
+        pending,
+        unclaimedPending,
+        error: unclaimedMessage(unclaimedPending),
+        attempts: 0,
+        nextRetryAt: 0,
+      });
+    } else {
+      setSyncState({
+        ...st,
+        state: 'idle',
+        pending,
+        unclaimedPending: 0,
+        error: null,
+        attempts: 0,
+        nextRetryAt: 0,
+      });
+    }
     saveStore(store);
-    return { ok: true, synced: 0 };
+    return { ok: true, synced: 0, pending, unclaimedPending };
   }
   if (!force && st.nextRetryAt && Date.now() < st.nextRetryAt) {
     return { ok: false, deferred: true, retryInMs: st.nextRetryAt - Date.now() };
@@ -289,27 +326,36 @@ async function doSyncNow(force) {
   dropDeadLettered(store, st);
   saveStore(store);
   const pending = store.queue.length;
+  const stillUnclaimed = store.queue.filter((e) => {
+    const p = store.profiles[e.profile_id];
+    return p && !p.claimed;
+  }).length;
   const attempts = pending > 0 ? (st.attempts || 0) + 1 : 0;
   const failed = profileErrors.length > 0 || networkErrors.length > 0;
   // Honest terminal state — never a permanent hang, never a mislabeled one.
+  // A queue that is ENTIRELY unclaimed events is not "idle" and not "waiting":
+  // those events will never sync until the reader is claimed.
   const state =
     pending === 0 ? 'idle'
+    : stillUnclaimed === pending ? 'unclaimed'
     : networkErrors.length > 0 && profileErrors.length === 0 ? 'offline'
     : 'server_error';
   const error =
     pending === 0 ? null
+    : stillUnclaimed === pending ? unclaimedMessage(stillUnclaimed)
     : [...new Set([...profileErrors, ...networkErrors])].slice(0, 3).join('; ');
   setSyncState({
     ...st,
     state,
     pending,
+    unclaimedPending: stillUnclaimed,
     error,
     attempts,
     nextRetryAt:
       pending > 0 ? Date.now() + Math.min(RETRY_BASE_MS * 2 ** (attempts - 1), RETRY_MAX_MS) : 0,
     lastSyncAt: synced > 0 || pending === 0 ? new Date().toISOString() : st.lastSyncAt,
   });
-  return { ok: !failed && pending === 0, synced, deadLettered, pending, error };
+  return { ok: !failed && pending === 0, synced, deadLettered, pending, unclaimedPending: stillUnclaimed, error };
 }
 
 // ---- shape translation (client camelCase <-> server snake_case) ----

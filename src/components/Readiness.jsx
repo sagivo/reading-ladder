@@ -4,26 +4,15 @@
 // Game 2: oral blending — push one token per sound, then pick the word.
 // Game 3: letter-sound mini-inventory.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Screen, BigButton, Title, Subtitle, TopBar, ProgressDots, QuizStep, ChoiceButton, randomPraise } from './ui.jsx';
 import { speak, speakSoundsSeparately, stop } from '../lib/speech.js';
 import { SOUNDS } from '../lib/curriculum.js';
 import { parseGraphemes } from '../lib/decodability.js';
-
-const SEQ_ITEMS = [
-  { words: ['dog', 'fish'], emoji: ['🐶', '🐟'] },
-  { words: ['cat', 'sun'], emoji: ['🐱', '☀️'] },
-  { words: ['pig', 'moon'], emoji: ['🐷', '🌙'] },
-];
-
-const BLEND_ITEMS = [
-  { word: 'map', sounds: ['m', 'a', 'p'] },
-  { word: 'sun', sounds: ['s', 'u', 'n'] },
-  { word: 'pig', sounds: ['p', 'i', 'g'] },
-  { word: 'hat', sounds: ['h', 'a', 't'] },
-];
-
-const INVENTORY_SOUNDS = ['m', 's', 'a', 't', 'p'];
+import {
+  SEQ_ITEMS, BLEND_ITEMS, INVENTORY_SOUNDS, SEQ_CORRECT_ID,
+  sequenceChoices, sequenceInstruction, blendWordChoices, inventoryChoices,
+} from '../lib/readiness.js';
 
 function soundOf(g) {
   return SOUNDS.find((s) => s.g === g);
@@ -43,24 +32,25 @@ function SequenceGame({ onDone }) {
   const [trial, setTrial] = useState(0);
   const [score, setScore] = useState(0);
   const item = SEQ_ITEMS[trial];
-  const instruction = `Listen: ${item.words[0]} … ${item.words[1]}. Tap what you heard.`;
+  const instruction = sequenceInstruction(item);
 
   useEffect(() => {
     speak(`Listen. ${item.words[0]}. ${item.words[1]}. Tap what you heard, in order.`);
   }, [trial]);
 
-  const forward = { id: 'fwd', label: item.emoji[0] + item.emoji[1], speak: `${item.words[0]} ${item.words[1]}` };
-  const backward = { id: 'bwd', label: item.emoji[1] + item.emoji[0], speak: `${item.words[1]} ${item.words[0]}` };
-  const choices = shuffle([forward, backward]);
+  // One shuffle per trial: QuizStep caches it on mount, and the key below
+  // remounts per trial so a finished trial can never swallow taps.
+  const choices = useMemo(() => shuffle(sequenceChoices(item)), [trial]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }}>
       <ProgressDots total={3} done={0} />
       <Title>Game 1 of 3 · Listening ears 👂</Title>
       <QuizStep
+        key={trial}
         instruction={instruction}
         choices={choices}
-        correctId="fwd"
+        correctId={SEQ_CORRECT_ID}
         onResult={({ correct }) => {
           const s = score + (correct ? 1 : 0);
           setScore(s);
@@ -103,10 +93,7 @@ function BlendGame({ onDone }) {
     else onDone(s);
   }
 
-  const wordChoices = shuffle([
-    { id: item.word, label: item.word, speak: item.word },
-    { id: 'other', label: item.word === 'map' ? 'tap' : 'map', speak: item.word === 'map' ? 'tap' : 'map' },
-  ]);
+  const wordChoices = useMemo(() => shuffle(blendWordChoices(item)), [trial]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }}>
@@ -140,6 +127,7 @@ function BlendGame({ onDone }) {
         </>
       ) : (
         <QuizStep
+          key={trial}
           instruction={`You pushed ${taps}. What word do the sounds make?`}
           choices={wordChoices}
           correctId={item.word}
@@ -162,12 +150,13 @@ function InventoryGame({ onDone }) {
     speak(`Which letter says ${s.say}, like ${s.keyword}? Tap it. Or tap "not sure".`);
   }, [trial]);
 
-  const distract = shuffle(SOUNDS.filter((x) => x.g !== g && x.g.length === 1)).slice(0, 2);
-  const choices = shuffle([
-    { id: g, label: g, speak: `the letter ${g}` },
-    ...distract.map((d) => ({ id: d.g, label: d.g, speak: `the letter ${d.g}` })),
-    { id: 'unsure', label: '🤷', sub: 'not sure' },
-  ]);
+  const distractGs = useMemo(
+    () => shuffle(SOUNDS.filter((x) => x.g !== g && x.g.length === 1).map((x) => x.g)).slice(0, 2),
+    [trial]
+  );
+  // Remount per trial (key) so a finished trial never swallows taps, and so
+  // the "🎉 You figured it out!" praise never persists into the next question.
+  const choices = useMemo(() => shuffle(inventoryChoices(g, distractGs)), [trial, g]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }}>
@@ -175,6 +164,7 @@ function InventoryGame({ onDone }) {
       <Title>Game 3 of 3 · Letter sounds 🔤</Title>
       <div style={{ fontSize: 72 }}>{s.emoji}</div>
       <QuizStep
+        key={trial}
         instruction={instruction}
         choices={choices}
         correctId={g}

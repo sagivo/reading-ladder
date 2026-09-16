@@ -23,7 +23,7 @@ import SessionEnd from './components/SessionEnd.jsx';
 import ParentDash from './components/ParentDash.jsx';
 import Companion from './components/Companion.jsx';
 import { Screen, Title, Subtitle } from './components/ui.jsx';
-import { loadStore, saveStore, touchProfile, queueEvent, loadDismissedClaimIds } from './lib/store.js';
+import { loadStore, saveStore, touchProfile, queueEvent, loadDismissedClaimIds, saveDismissedClaimIds } from './lib/store.js';
 import { saveLessonProgress, loadLessonProgress, clearLessonProgress } from './lib/store.js';
 import { mergeOnLaunch, syncNow } from './lib/sync.js';
 import { getMe, logout, listProfiles, isAuthError } from './lib/auth.js';
@@ -317,6 +317,18 @@ export default function App() {
   };
 
   // ---- flows ----
+  /** From the dashboard's sync card: re-offer claiming for unclaimed readers. */
+  function reclaimUnclaimed() {
+    const s = loadStore();
+    const unclaimed = Object.values(s.profiles).filter((p) => !p.claimed);
+    if (unclaimed.length === 0) return;
+    // Un-dismiss them so the claim screen offers them again.
+    const ids = new Set(unclaimed.map((p) => p.id));
+    saveDismissedClaimIds(loadDismissedClaimIds().filter((id) => !ids.has(id)));
+    setClaimIds(unclaimed.map((p) => p.id));
+    setScreen('claim');
+  }
+
   function selectProfile(id, startLesson = false) {
     setActiveId(id);
     if (startLesson) {
@@ -443,6 +455,9 @@ export default function App() {
             setClaimIds(null);
             setStore({ ...loadStore() });
             setScreen('home');
+            // Newly-claimed readers may have a backlog of on-device events —
+            // flush them now that they belong to the account.
+            syncNow().then(() => setStore({ ...loadStore() })).catch(() => {});
           }}
           onSessionExpired={handleSessionExpired}
         />
@@ -528,6 +543,7 @@ export default function App() {
           parent={parent}
           onLogout={doLogout}
           onManageKids={() => setScreen('kids')}
+          onClaimUnclaimed={reclaimUnclaimed}
           onSessionExpired={handleSessionExpired}
         />
       )}

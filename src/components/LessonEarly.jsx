@@ -49,8 +49,16 @@ function ReviewStep({ misses, stage, onDone, L }) {
 
   useEffect(() => {
     stop();
-    speak(`Let's warm up. Tap the word you hear.`);
-    setTimeout(() => speak(miss.ref, { rate: 0.8 }), 1500);
+    // Direction first, then the target word — chained, not a fixed timer,
+    // so the word can never cut the direction off on a slow first load.
+    let cancelled = false;
+    const w = miss.ref;
+    Promise.resolve(speak(`Let's warm up. Tap the word you hear.`)).then(() => {
+      if (!cancelled) speak(w, { rate: 0.8 });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [i]);
 
   return (
@@ -211,6 +219,7 @@ function FirstSoundStep({ sound, onDone, L }) {
     <QuizStep
       key={trial}
       instruction={instruction}
+      speakInstruction={false}
       choices={shuffle([
         { id: 'yes', label: target[1], sub: target[0], speak: target[0] },
         { id: 'no', label: wrong[1], sub: wrong[0], speak: wrong[0] },

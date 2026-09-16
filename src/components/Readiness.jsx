@@ -49,6 +49,7 @@ function SequenceGame({ onDone }) {
       <QuizStep
         key={trial}
         instruction={instruction}
+        speakInstruction={false}
         choices={choices}
         correctId={SEQ_CORRECT_ID}
         onResult={({ correct }) => {
@@ -75,11 +76,18 @@ function BlendGame({ onDone }) {
   useEffect(() => {
     stop();
     // Chunked for a 3-year-old: one short direction, then the sounds, then
-    // the next step — never a 12-word breath.
-    speak('Push one token for each sound you hear. Then tap the green button.');
-    setTimeout(() => {
-      speakSoundsSeparately(item.sounds.map(soundOf));
-    }, 1200);
+    // the next step — never a 12-word breath. Chained on the direction's
+    // completion (not a fixed timer) so the sounds can never cut it off on
+    // a slow first load; the cleanup flag drops the chain on trial change.
+    let cancelled = false;
+    Promise.resolve(
+      speak('Push one token for each sound you hear. Then tap the green button.')
+    ).then(() => {
+      if (!cancelled) speakSoundsSeparately(item.sounds.map(soundOf));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [trial]);
 
   const instruction = 'Push one token for each sound, then pick the word.';
@@ -168,6 +176,7 @@ function InventoryGame({ onDone }) {
       <QuizStep
         key={trial}
         instruction={instruction}
+        speakInstruction={false}
         choices={choices}
         correctId={g}
         onResult={({ correct, modeled }) => {

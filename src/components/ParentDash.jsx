@@ -88,7 +88,7 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
     setSyncing(true);
     setSyncError(null);
     try {
-      await syncNow();
+      await syncNow(true); // manual tap always forces, bypassing backoff
     } catch (e) {
       if (isAuthError(e)) {
         onSessionExpired();
@@ -174,7 +174,13 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
       <Card title="🔄 Sync status">
         <div style={{ fontSize: 19 }}>{syncLabel}</div>
         {shownError && <div style={{ fontSize: 16, color: '#a33', marginTop: 6 }}>{shownError}</div>}
-        {(sync.pending > 0 || shownError) && <div style={{ marginTop: 8 }}><BigButton small onClick={doSync} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now 🔄'}</BigButton></div>}
+        {sync.deadLetter && sync.deadLetter.length > 0 && (
+          <div style={{ fontSize: 16, color: '#a33', marginTop: 6 }}>
+            ⚠️ {sync.deadLetter.length} change{sync.deadLetter.length === 1 ? '' : 's'} couldn't be saved
+            ({sync.deadLetter[0].error}). Progress is safe on this device.
+          </div>
+        )}
+        {(sync.pending > 0 || shownError || (sync.deadLetter && sync.deadLetter.length > 0)) && <div style={{ marginTop: 8 }}><BigButton small onClick={doSync} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now 🔄'}</BigButton></div>}
         <div style={{ fontSize: 15, color: '#5b567d', marginTop: 8 }}>
           Lessons always work offline. Progress is stored on this device first, then synced to the family database when connected.
         </div>

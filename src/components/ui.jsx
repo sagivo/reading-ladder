@@ -4,6 +4,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { narrate as speak, narrateQueue, stop, replayLast } from '../lib/narration.js';
+import { celebrate } from '../lib/praise.js';
 import { createTrial } from '../lib/quizstep.js';
 
 export function Screen({ children, bg = 'linear-gradient(160deg, #f5f0ff 0%, #eef6ff 100%)' }) {
@@ -171,16 +172,18 @@ export function QuizStep({ instruction, choices, correctId, onResult, speakInstr
     if (ev.kind === 'correct') {
       const praise = randomPraise();
       setFeedback({ text: `🎉 ${praise}` });
-      // Fire-and-forget: the lesson advances on its own short timer. Awaiting
-      // narration here made correct taps feel "ignored" whenever audio was
-      // slow (e.g. falling through to the safety net or Web Speech).
-      speak(praise);
+      // Celebrate globally AND advance immediately: the praise survives the
+      // transition as a floating overlay + uncut audio (praise.js), while the
+      // lesson moves on without the old post-correct dead pause that felt
+      // "stuck" to small children. onResult must fire synchronously so the
+      // parent advances in the same tick as the tap.
+      celebrate(`🎉 ${praise}`);
       onResult({ correct: true, modeled: false, hints: ev.hints });
       return;
     }
     if (ev.kind === 'copied') {
       setFeedback({ text: '🎉 Good copying!' });
-      speak('Good copying!');
+      celebrate('🎉 Good copying!');
       onResult({ correct: false, modeled: true, hints: 3 });
       return;
     }

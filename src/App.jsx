@@ -32,6 +32,38 @@ import { recordAttempt, newSoundMastery, addMiss, clearMiss, nextTargetIndex, is
 import { SOUNDS, ACCESSORIES } from './lib/curriculum.js';
 import { setSoundEnabled } from './lib/speech.js';
 import { setVoice, DEFAULT_VOICE } from './lib/narration.js';
+import { onPraise, PRAISE_MS } from './lib/praise.js';
+
+/** Floating celebration banner: correct answers advance the lesson
+    immediately, and the praise travels with the transition instead of
+    holding the screen hostage. */
+function PraiseOverlay() {
+  const [text, setText] = useState(null);
+  useEffect(() => {
+    let timer = null;
+    const off = onPraise((t) => {
+      setText(t);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setText(null), PRAISE_MS);
+    });
+    return () => {
+      off();
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+  if (!text) return null;
+  return (
+    <div style={{
+      position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)',
+      zIndex: 9999, background: '#fff7d6', border: '4px solid #f5b301',
+      borderRadius: 24, padding: '12px 28px', fontSize: 30, fontWeight: 800,
+      color: '#2d2a45', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+      pointerEvents: 'none', textAlign: 'center', maxWidth: '90vw',
+    }}>
+      {text}
+    </div>
+  );
+}
 
 function OfflineBanner() {
   return (
@@ -390,6 +422,7 @@ export default function App() {
 
   return (
     <>
+      <PraiseOverlay />
       {showOffline && <OfflineBanner />}
       {screen === 'checking' && (
         <Screen>

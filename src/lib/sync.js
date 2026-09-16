@@ -129,62 +129,187 @@ export async function mergeOnLaunch(parentId) {
  * owned by the current parent. Events for unclaimed profiles stay queued
  * locally until the profile is adopted. AuthError is rethrown so the app
  * can route to sign-in; it is never retried silently.
+ *
+ * Reliability contract (the queue used to stall forever on one poison
+ * event — a single failing profile POST 500'd the whole batch, nothing
+ * was acked, and the identical batch was retried forever):
+ *  - in-flight guard: concurrent triggers share one run, never overlap;
+ *  - per-profile isolation: one profile's failure never aborts the others;
+ *  - per-event isolation: the server acks what landed and reports the
+ *    rest in `failed`; only acked ids leave the queue;
+ *  - dead-letter: an event that fails 3 times is parked (parent-visible)
+ *    instead of retried forever;
+ *  - backoff: after a failed run, automatic triggers wait before retrying
+ *    (manual "Sync now" always forces);
+ *  - the `syncing` state can never stick: try/finally always lands on a
+ *    terminal state, and requests have a timeout.
  */
-export async function syncNow() {
+let inflight = null;
+
+const MAX_EVENT_FAILURES = 3; // then the event is dead-lettered (parent-visible)
+const RETRY_BASE_MS = 30000;
+const RETRY_MAX_MS = 300000;
+
+function noteEventFailure(st, ev, error) {
+  st.failCounts = st.failCounts || {};
+  const rec = st.failCounts[ev.id] || { n: 0 };
+  rec.n += 1;
+  rec.error = String(error || 'sync failed').slice(0, 200);
+  rec.at = new Date().toISOString();
+  st.failCounts[ev.id] = rec;
+  if (rec.n >= MAX_EVENT_FAILURES) {
+    st.deadLetter = st.deadLetter || [];
+    if (st.deadLetter.length < 50 && !st.deadLetter.some((d) => d.id === ev.id)) {
+      st.deadLetter.push({
+        id: ev.id,
+        profile_id: ev.profile_id,
+        type: ev.type,
+        error: rec.error,
+        at: rec.at,
+      });
+    }
+    delete st.failCounts[ev.id];
+    return true; // dead-lettered
+  }
+  return false;
+}
+
+function dropDeadLettered(store, st) {
+  const dead = new Set((st.deadLetter || []).map((d) => d.id));
+  if (dead.size) store.queue = store.queue.filter((e) => !dead.has(e.id));
+}
+
+export function syncNow(force = false) {
+  if (inflight) return inflight; // a sync is already running — share it
+  inflight = doSyncNow(force).finally(() => {
+    inflight = null;
+  });
+  return inflight;
+}
+
+async function doSyncNow(force) {
   const store = loadStore();
+  dropDeadLettered(store, getSyncState());
   const byProfile = {};
   for (const ev of store.queue) {
     const p = store.profiles[ev.profile_id];
     if (p && !p.claimed) continue; // not this parent's (yet) — stays local until adopted
     (byProfile[ev.profile_id] = byProfile[ev.profile_id] || []).push(ev);
   }
+  const st = getSyncState();
   if (!Object.keys(byProfile).length) {
-    setSyncState({ state: 'idle', pending: store.queue.length });
+    setSyncState({ state: 'idle', pending: store.queue.length, error: null });
+    saveStore(store);
     return { ok: true, synced: 0 };
   }
-  setSyncState({ state: 'syncing' });
+  if (!force && st.nextRetryAt && Date.now() < st.nextRetryAt) {
+    return { ok: false, deferred: true, retryInMs: st.nextRetryAt - Date.now() };
+  }
+
+  setSyncState({ state: 'syncing', error: null });
   let synced = 0;
+  let deadLettered = 0;
+  const profileErrors = [];
+  const networkErrors = [];
   try {
     for (const [pid, events] of Object.entries(byProfile)) {
-      const profile = store.profiles[pid];
-      const res = await api(`/api/profiles/${pid}/events`, {
-        method: 'POST',
-        body: { events, state: profile ? toServer(profile) : undefined },
-      });
-      // Archive transitions made while offline: propagate via the contract's
-      // explicit archived flag (the state snapshot doesn't carry it). Do this
-      // BEFORE acking so a failed PUT keeps the events queued for retry
-      // (server dedupes events by id, so re-posting is safe).
-      const archiveEv = [...events]
-        .reverse()
-        .find((e) => e.type === 'profile_archived' || e.type === 'profile_restored');
-      if (archiveEv) {
-        await api(`/api/profiles/${pid}`, {
-          method: 'PUT',
-          body: { archived: archiveEv.type === 'profile_archived' },
+      const byId = new Map(events.map((e) => [e.id, e]));
+      try {
+        const profile = store.profiles[pid];
+        const res = await api(`/api/profiles/${pid}/events`, {
+          method: 'POST',
+          body: { events, state: profile ? toServer(profile) : undefined },
+          timeout: 25000,
         });
+        // Ack what the server durably stored — immediately, per event.
+        const acked = res.acked || [];
+        ackEvents(store, acked);
+        synced += acked.length;
+        for (const id of acked) {
+          if (st.failCounts) delete st.failCounts[id];
+        }
+        // Server-rejected events: count, dead-letter at the threshold.
+        for (const f of res.failed || []) {
+          const ev = byId.get(f.id);
+          if (ev && noteEventFailure(st, ev, f.error)) deadLettered++;
+        }
+        if (res.stateError) {
+          profileErrors.push(`profile snapshot rejected: ${res.stateError}`);
+        }
+        // Archive transitions made while offline: propagate via the
+        // contract's explicit archived flag. The events are already acked
+        // above; if the PUT fails we re-queue just the archive event so
+        // the transition is retried next sync (server dedupes by id).
+        const archiveEv = [...events]
+          .reverse()
+          .find((e) => e.type === 'profile_archived' || e.type === 'profile_restored');
+        if (archiveEv) {
+          try {
+            await api(`/api/profiles/${pid}`, {
+              method: 'PUT',
+              body: { archived: archiveEv.type === 'profile_archived' },
+              timeout: 25000,
+            });
+          } catch (e) {
+            if (isAuthError(e)) throw e;
+            if (!store.queue.some((q) => q.id === archiveEv.id)) store.queue.push(archiveEv);
+            profileErrors.push(`archive flag retry pending: ${String((e && e.message) || e)}`);
+          }
+        }
+      } catch (e) {
+        if (isAuthError(e)) throw e;
+        const msg = String((e && e.message) || e);
+        if (msg === 'network_unreachable' || msg === 'request_timeout') networkErrors.push(msg);
+        else profileErrors.push(msg);
+        // Whole-profile POST failed: count it against each unacked event.
+        for (const ev of events) {
+          if (store.queue.some((q) => q.id === ev.id) && noteEventFailure(st, ev, msg)) deadLettered++;
+        }
       }
-      ackEvents(store, res.acked || events.map((e) => e.id));
-      synced += (res.acked || []).length;
     }
-    saveStore(store);
-    const pending = store.queue.length;
-    setSyncState({
-      state: 'idle',
-      pending,
-      lastSyncAt: new Date().toISOString(),
-      error: null,
-    });
-    return { ok: true, synced };
   } catch (e) {
+    // AuthError (rethrown per profile) or an unexpected top-level failure.
     saveStore(store);
     if (isAuthError(e)) {
       noteAuth();
       throw e;
     }
-    setSyncState({ state: 'offline', pending: store.queue.length, error: String((e && e.message) || e) });
-    return { ok: false, synced, error: String((e && e.message) || e) };
+    const attempts = (st.attempts || 0) + 1;
+    setSyncState({
+      ...st,
+      state: 'server_error',
+      pending: store.queue.length,
+      error: String((e && e.message) || e),
+      attempts,
+      nextRetryAt: Date.now() + Math.min(RETRY_BASE_MS * 2 ** (attempts - 1), RETRY_MAX_MS),
+    });
+    return { ok: false, synced, deadLettered, error: String((e && e.message) || e) };
   }
+
+  dropDeadLettered(store, st);
+  saveStore(store);
+  const pending = store.queue.length;
+  const attempts = pending > 0 ? (st.attempts || 0) + 1 : 0;
+  const failed = profileErrors.length > 0 || networkErrors.length > 0;
+  // Honest terminal state — never a permanent hang, never a mislabeled one.
+  const state =
+    pending === 0 ? 'idle'
+    : networkErrors.length > 0 && profileErrors.length === 0 ? 'offline'
+    : 'server_error';
+  const error =
+    pending === 0 ? null
+    : [...new Set([...profileErrors, ...networkErrors])].slice(0, 3).join('; ');
+  setSyncState({
+    ...st,
+    state,
+    pending,
+    error,
+    attempts,
+    nextRetryAt:
+      pending > 0 ? Date.now() + Math.min(RETRY_BASE_MS * 2 ** (attempts - 1), RETRY_MAX_MS) : 0,
+    lastSyncAt: synced > 0 || pending === 0 ? new Date().toISOString() : st.lastSyncAt,
+  });
+  return { ok: !failed && pending === 0, synced, deadLettered, pending, error };
 }
 
 // ---- shape translation (client camelCase <-> server snake_case) ----

@@ -19,8 +19,12 @@ export function isAuthError(e) {
 }
 
 /** fetch wrapper: 401 -> AuthError (unless sessionError: false),
-    other failures -> Error with server message. */
-export async function api(path, { method = 'GET', body, sessionError = true } = {}) {
+    other failures -> Error with server message.
+    `timeout` (ms) aborts a hung request so the UI can never stick on
+    "Syncing…" forever; callers map AbortError to 'request_timeout'. */
+export async function api(path, { method = 'GET', body, sessionError = true, timeout = 25000 } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
   let res;
   try {
     res = await fetch(path, {
@@ -28,13 +32,20 @@ export async function api(path, { method = 'GET', body, sessionError = true } = 
       credentials: 'same-origin',
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
     });
   } catch (e) {
+    clearTimeout(timer);
+    if (e && e.name === 'AbortError') {
+      const err = new Error('request_timeout');
+      throw err;
+    }
     // Network unreachable / DNS / CORS-level failure.
     const err = new Error('network_unreachable');
     err.cause = e;
     throw err;
   }
+  clearTimeout(timer);
   if (res.status === 401 && sessionError) throw new AuthError();
   if (!res.ok) {
     let msg = `Request failed (${res.status})`;
@@ -57,6 +68,8 @@ export function friendlyError(e) {
   if (isAuthError(e)) return 'Your session expired — please sign in again.';
   if (e.message === 'network_unreachable')
     return "Couldn't reach the server — check your connection and try again.";
+  if (e.message === 'request_timeout')
+    return 'The request timed out — please try again.';
   if (e.message) return e.message;
   return 'Something went wrong — please try again.';
 }

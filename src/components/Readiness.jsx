@@ -64,10 +64,9 @@ function SequenceGame({ onDone }) {
         onResult={({ correct }) => {
           const s = score + (correct ? 1 : 0);
           setScore(s);
-          setTimeout(() => {
-            if (trial + 1 < 2) setTrial(trial + 1);
-            else onDone(s);
-          }, 900);
+          // Immediate: celebration travels with the transition (praise.js).
+          if (trial + 1 < 2) setTrial(trial + 1);
+          else onDone(s);
         }}
       />
     </div>
@@ -99,10 +98,9 @@ function BlendGame({ onDone }) {
     setScore(s);
     setTaps(0);
     setCounted(false);
-    setTimeout(() => {
-      if (trial + 1 < 2) setTrial(trial + 1);
-      else onDone(s);
-    }, 900);
+    // Immediate: celebration travels with the transition (praise.js).
+    if (trial + 1 < 2) setTrial(trial + 1);
+    else onDone(s);
   }
 
   const wordChoices = shuffle([
@@ -184,10 +182,9 @@ function InventoryGame({ onDone }) {
           // "not sure" or modeled counts as not-known, without penalty language
           const s2 = score + (correct && !modeled ? 1 : 0);
           setScore(s2);
-          setTimeout(() => {
-            if (trial + 1 < INVENTORY_SOUNDS.length) setTrial(trial + 1);
-            else onDone(s2);
-          }, 900);
+          // Immediate: celebration travels with the transition (praise.js).
+          if (trial + 1 < INVENTORY_SOUNDS.length) setTrial(trial + 1);
+          else onDone(s2);
         }}
       />
     </div>

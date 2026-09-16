@@ -116,7 +116,7 @@ function FirstSounds({ sounds, L, onDone }) {
       correctId="yes"
       onResult={(r) => {
         L.trial({ grapheme: target.g, word: null, format: 'recall', transfer: false, result: r, pre: true });
-        setTimeout(() => (round + 1 < 4 ? setRound(round + 1) : onDone()), 900);
+        (round + 1 < 4 ? setRound(round + 1) : onDone());
       }}
     />
   );
@@ -146,7 +146,7 @@ function LetterPair({ sounds, L, onDone }) {
         correctId={target.g}
         onResult={(r) => {
           L.trial({ grapheme: target.g, word: null, format: 'recall', transfer: false, result: r, pre: true });
-          setTimeout(() => (round + 1 < 4 ? setRound(round + 1) : onDone()), 900);
+          (round + 1 < 4 ? setRound(round + 1) : onDone());
         }}
       />
     </div>
@@ -181,7 +181,7 @@ function OrderGame({ L, onDone }) {
       correctId="fwd"
       onResult={(r) => {
         L.trial({ grapheme: null, word: null, format: 'recall', transfer: false, result: r, pre: true });
-        setTimeout(() => (round + 1 < 2 ? setRound(round + 1) : onDone()), 900);
+        (round + 1 < 2 ? setRound(round + 1) : onDone());
       }}
     />
   );
@@ -211,11 +211,10 @@ export default function LessonPre({ profile, plan, L, onFinish, onHome, initialS
     if (onStep) onStep(i);
   }, [i]);
 
+  // Immediate step transitions (see LessonEarly): no post-correct dead pause.
   function advance() {
-    setTimeout(() => {
-      if (i + 1 < STEPS.length) setI(i + 1);
-      else onFinish({ mission: plan.mission, focusSound: plan.focus.g });
-    }, 600);
+    if (i + 1 < STEPS.length) setI(i + 1);
+    else onFinish({ mission: plan.mission, focusSound: plan.focus.g });
   }
 
   return (

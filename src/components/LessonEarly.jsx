@@ -63,7 +63,9 @@ function ReviewStep({ misses, stage, onDone, L }) {
       onResult={(r) => {
         L.trial({ word: miss.ref, format: 'recall', transfer: false, result: r, grapheme: null });
         if (r.correct && r.hints === 0) L.clearMiss(miss.id);
-        setTimeout(() => (i + 1 < misses.length ? setI(i + 1) : onDone()), 900);
+        // Immediate: the celebration now travels with the transition (praise.js),
+        // so there is no post-correct dead pause.
+        (i + 1 < misses.length ? setI(i + 1) : onDone());
       }}
     />
   );
@@ -109,7 +111,7 @@ function NewSoundStep({ sound, stage, onDone, L }) {
         L.trial({ grapheme: sound.g, format: 'recall', transfer: false, result: r, word: null });
         const t = trials + 1;
         setTrials(t);
-        setTimeout(() => (t < 2 ? setPhase('practice') : onDone()), 900);
+        (t < 2 ? setPhase('practice') : onDone());
       }}
     />
   );
@@ -182,7 +184,7 @@ function BlendStep({ items, stage, onDone, L }) {
       correctId={item.word}
       onResult={(r) => {
         L.trial({ grapheme: null, word: item.word, format: 'blend', transfer: item.transfer, result: r });
-        setTimeout(() => (i + 1 < items.length ? setI(i + 1) : onDone()), 900);
+        (i + 1 < items.length ? setI(i + 1) : onDone());
       }}
     />
   );
@@ -214,7 +216,7 @@ function FirstSoundStep({ sound, onDone, L }) {
       onResult={(r) => {
         L.trial({ grapheme: sound.g, word: null, format: 'recall', transfer: false, result: r });
         const t = trial + 1;
-        setTimeout(() => (t < 3 ? setTrial(t) : onDone()), 900);
+        (t < 3 ? setTrial(t) : onDone());
       }}
     />
   );
@@ -349,7 +351,7 @@ function StoryStep({ story, onDone, L }) {
       correctId={q.correct}
       onResult={(r) => {
         L.trial({ grapheme: null, word: q.correct, format: 'transfer', transfer: true, result: r });
-        setTimeout(onDone, 900);
+        onDone();
       }}
     />
   );
@@ -380,15 +382,15 @@ export default function LessonEarly({ profile, plan, L, onFinish, onHome, initia
     story: 'Tap each line to hear the story.',
   }[step];
 
+  // Immediate step transitions: the old 600ms wrapper stacked on top of the
+  // per-question pause and made every correct answer feel stuck.
   function advance(countWords = 0) {
     setWordsRead((w) => w + countWords);
-    setTimeout(() => {
-      if (i + 1 < steps.length) setI(i + 1);
-      else {
-        const mastered = profile.mastery[plan.sound.g] && profile.mastery[plan.sound.g].status === 'mastered';
-        onFinish({ newSound: plan.sound.g, wordsRead: wordsRead + countWords, mission: plan.mission, soundMastered: !!mastered });
-      }
-    }, 600);
+    if (i + 1 < steps.length) setI(i + 1);
+    else {
+      const mastered = profile.mastery[plan.sound.g] && profile.mastery[plan.sound.g].status === 'mastered';
+      onFinish({ newSound: plan.sound.g, wordsRead: wordsRead + countWords, mission: plan.mission, soundMastered: !!mastered });
+    }
   }
 
   const total = steps.length;

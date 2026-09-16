@@ -31,7 +31,7 @@ export default function SessionEnd({ profile, summary, unlockedAccessory, onDone
       </div>
       <Title>All done! 🎉</Title>
       <Subtitle>
-        {summary.newSound && <>You learned <b>/{sound ? sound.say : summary.newSound}/</b> ({summary.newSound}).<br /></>}
+        {summary.newSound && <>You learned{' '}<b>/{sound ? sound.say : summary.newSound}/</b>{' '}({summary.newSound}).<br /></>}
         {summary.wordsRead > 0 && <>You read <b>{summary.wordsRead}</b> {summary.wordsRead === 1 ? 'word' : 'words'}.<br /></>}
         {summary.soundMastered && <>🌟 You <b>mastered</b> a sound!<br /></>}
         {summary.minutes != null && <>Lesson time: {summary.minutes} min.<br /></>}

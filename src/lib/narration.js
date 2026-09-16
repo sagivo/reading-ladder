@@ -40,6 +40,16 @@ let generation = 0;
 let lastSpoken = null; // text | string[] — what replayLast() re-plays
 const statusListeners = new Set();
 
+// Narration hold: after a celebration, the next question's instruction
+// waits instead of cutting the praise audio off mid-word. Set by
+// celebrate() in praise.js; respected by narrate()/narrateQueue() unless
+// the caller passes { ignoreHold: true } (the praise itself).
+let holdUntil = 0;
+/** Hold the narration channel for ms: incoming narrate() calls wait. */
+export function holdNarration(ms) {
+  holdUntil = Math.max(holdUntil, Date.now() + ms);
+}
+
 export function setVoice(v) {
   if (VOICES[v]) currentVoice = v;
 }
@@ -145,6 +155,13 @@ async function playClip(text, voice, opts = {}) {
 
 /** Speak one string. Cancels anything currently playing first. */
 export async function narrate(text, opts = {}) {
+  // Respect a celebration hold: wait (briefly) instead of cutting praise off.
+  const gen0 = generation;
+  const wait = holdUntil - Date.now();
+  if (wait > 0 && !opts.ignoreHold) {
+    await new Promise((r) => setTimeout(r, Math.min(wait, 4000)));
+    if (gen0 !== generation) return; // stopped/navigated while waiting
+  }
   stop();
   const gen = generation;
   if (text && !opts.noRecord) lastSpoken = text;
@@ -158,6 +175,12 @@ export async function narrate(text, opts = {}) {
  * All parts are pre-generated; this never synthesizes.
  */
 export async function narrateQueue(texts, opts = {}) {
+  const gen0 = generation;
+  const wait = holdUntil - Date.now();
+  if (wait > 0 && !opts.ignoreHold) {
+    await new Promise((r) => setTimeout(r, Math.min(wait, 4000)));
+    if (gen0 !== generation) return;
+  }
   stop();
   const gen = generation;
   if (texts && texts.length && !opts.noRecord) lastSpoken = texts.slice();

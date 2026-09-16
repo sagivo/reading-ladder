@@ -74,23 +74,29 @@ function BlendGame({ onDone }) {
   const tokens = [0, 1, 2, 3, 4];
 
   useEffect(() => {
+    // Word-pick phase: QuizStep speaks its own instruction — never cut it.
+    // (Child effects run before parent effects, so an unconditional stop()
+    // here would silence the question that just started.)
+    if (counted) return;
     stop();
     // Chunked for a 3-year-old: one short direction, then the sounds, then
     // the next step — never a 12-word breath. Chained on the direction's
     // completion (not a fixed timer) so the sounds can never cut it off on
     // a slow first load; the cleanup flag drops the chain on trial change.
+    // The sounds don't overwrite the replay slot: "Hear it again" must
+    // always re-speak the full direction, not just the sounds.
     let cancelled = false;
     Promise.resolve(
-      speak('Push one token for each sound you hear. Then tap the green button.')
+      speak('Tap one circle for each sound you hear. Then tap the green button.')
     ).then(() => {
-      if (!cancelled) speakSoundsSeparately(item.sounds.map(soundOf));
+      if (!cancelled) speakSoundsSeparately(item.sounds.map(soundOf), { noRecord: true });
     });
     return () => {
       cancelled = true;
     };
-  }, [trial]);
+  }, [trial, counted]);
 
-  const instruction = 'Push one token for each sound, then pick the word.';
+  const instruction = 'Tap one circle for each sound, then pick the word.';
 
   function finishTrial(wordCorrect) {
     const ok = taps === item.sounds.length && wordCorrect;
@@ -131,14 +137,14 @@ function BlendGame({ onDone }) {
             <BigButton small onClick={() => setCounted(true)}>I pushed {taps} ✓</BigButton>
           </div>
           <button
-            onClick={() => speakSoundsSeparately(item.sounds.map(soundOf))}
+            onClick={() => speakSoundsSeparately(item.sounds.map(soundOf), { noRecord: true })}
             style={{ background: 'none', border: 'none', fontSize: 20, color: '#6f66a8', textDecoration: 'underline', cursor: 'pointer', minHeight: 48, padding: '8px 16px' }}
           >🔁 Play the sounds again</button>
         </>
       ) : (
         <QuizStep
           key={trial}
-          instruction={`You pushed ${taps}. What word do the sounds make?`}
+          instruction="What word do the sounds make?"
           choices={wordChoices}
           correctId={item.word}
           onResult={({ correct }) => finishTrial(correct)}
@@ -197,9 +203,11 @@ export default function Readiness({ profile, onDone, onHome, initialGame = 0, in
   const [game, setGame] = useState(initialGame);
   const [results, setResults] = useState(initialResults);
 
-  useEffect(() => {
-    speak(`Hi ${profile.name}! Let's play three listening games.`);
-  }, []);
+  // NOTE: no spoken greeting here on purpose. narrate() cancels whatever is
+  // playing, and a parent greeting would cut off the first game's question
+  // (child effects run before parent effects) — the child would only ever
+  // hear the greeting and never learn the task. The game's own instruction
+  // is the opener.
 
   function next(r) {
     const res = { ...results, ...r };

@@ -3,7 +3,7 @@
 
 import React, { useEffect } from 'react';
 import { Screen, BigButton, Title, Subtitle } from './ui.jsx';
-import { narrate as speak, stop } from '../lib/narration.js';
+import { narrateQueue, stop } from '../lib/narration.js';
 import { SOUNDS, ACCESSORIES } from '../lib/curriculum.js';
 import { companionEmoji, companionBg } from './Home.jsx';
 
@@ -12,16 +12,18 @@ export default function SessionEnd({ profile, summary, unlockedAccessory, onDone
 
   useEffect(() => {
     stop();
-    const bits = [];
-    if (summary.newSound) bits.push(`You learned the sound ${sound ? sound.say : summary.newSound}.`);
-    if (summary.wordsRead) bits.push(`You read ${summary.wordsRead} words.`);
-    if (summary.soundMastered) bits.push('You mastered a sound!');
+    // Fixed parts via narrateQueue, not one composed string: the composed
+    // string could never match a pre-generated clip hash, so the whole
+    // summary fell back to Web Speech. Only the mission text is dynamic.
+    const parts = ['All done!'];
+    if (summary.newSound) parts.push(`You learned the sound ${sound ? sound.say : summary.newSound}.`);
+    if (summary.wordsRead) parts.push(`You read ${summary.wordsRead} ${summary.wordsRead === 1 ? 'word' : 'words'}.`);
+    if (summary.soundMastered) parts.push('You mastered a sound!');
     // The offline mission is the loop-closer: it must be SPOKEN, not just
     // shown — a pre-reader can never read it off the screen.
-    const missionBit = summary.mission
-      ? ` Time for a real-world mission. ${summary.mission} Tell a grown-up when you've done it.`
-      : '';
-    speak('All done! ' + bits.join(' ') + missionBit + ' Tap Done to finish.');
+    if (summary.mission) parts.push(`Time for a real-world mission. ${summary.mission} Tell a grown-up when you've done it.`);
+    parts.push('Tap Done to finish.');
+    narrateQueue(parts);
   }, []);
 
   const acc = ACCESSORIES.find((a) => a.id === unlockedAccessory);

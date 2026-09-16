@@ -146,7 +146,7 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
               key={p.id}
               p={p}
               selected={p.id === activeId}
-              onTap={() => { speak(`Hi ${p.name}!`); onSelect(p.id); }}
+              onTap={() => { speak('Hi!'); onSelect(p.id); }}
             />
           ))}
           <GatedAddReader onManageKids={onManageKids} dashed />
@@ -165,7 +165,7 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
           ) : (
             <BigButton
               color="#22a06b"
-              onClick={() => { speak(`Let's read, ${active.name}!`); onSelect(active.id, true); }}
+              onClick={() => { speak('Let\'s read!'); onSelect(active.id, true); }}
             >
               {active.track ? `▶ Start ${active.name}'s lesson` : `▶ Play ${active.name}'s reading game`}
             </BigButton>

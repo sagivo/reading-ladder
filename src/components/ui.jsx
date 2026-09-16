@@ -294,10 +294,12 @@ export function QuizStep({ instruction, choices, correctId, onResult, speakInstr
             </ChoiceButton>
             {/* Audio-first for pre-readers: tap the speaker to hear what the
                 card says, without answering. Critical for word/picture
-                choices a non-reading 3-year-old can't decode visually. */}
+                choices a non-reading 3-year-old can't decode visually.
+                noRecord: previewing a choice must not steal the "Hear it
+                again" slot — that always re-speaks the full question. */}
             <button
               aria-label={`Hear: ${c.speak || c.label}`}
-              onClick={() => speak(c.speak || c.label)}
+              onClick={() => speak(c.speak || c.label, { noRecord: true })}
               style={{
                 position: 'absolute', top: -14, right: -14, width: 52, height: 52,
                 borderRadius: '50%', border: '3px solid #7c5cd6', background: '#fff',

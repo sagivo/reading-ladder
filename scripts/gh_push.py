@@ -63,8 +63,8 @@ def api(method, path, data=None, retries=8):
 
 
 def main():
-    branch = sys.argv[1] if len(sys.argv) > 1 else "audio/speechify-voice"
-    title = sys.argv[2] if len(sys.argv) > 2 else "Speechify single-voice narration"
+    branch = sys.argv[1] if len(sys.argv) > 1 else "audio/instruction-race-and-replay"
+    title = sys.argv[2] if len(sys.argv) > 2 else "Fix spoken instructions: races, replay, catalog drift"
     # Staged changes in the local clone (git add -A first).
     status = subprocess.check_output(["git", "status", "--porcelain", "-uall"], text=True).splitlines()
     changed, deleted = [], []
@@ -103,6 +103,14 @@ def main():
 
     base = api("GET", f"/repos/{REPO}/git/ref/heads/main")["object"]["sha"]
     base_tree = api("GET", f"/repos/{REPO}/git/commits/{base}")["tree"]["sha"]
+    # Local HEAD is stale relative to main (API commits never land locally),
+    # so `deleted` can name files already gone from main. Deleting a path that
+    # isn't in the base tree is a no-op request GitHub may reject — filter.
+    base_paths = {t["path"] for t in api("GET", f"/repos/{REPO}/git/trees/{base_tree}?recursive=1")["tree"]}
+    skipped = [p for p in deleted if p not in base_paths]
+    deleted = [p for p in deleted if p in base_paths]
+    if skipped:
+        print(f"skipping {len(skipped)} deletions already absent from main", flush=True)
     tree = []
     for i, path in enumerate(changed):
         sha = blob_for(path)
@@ -112,16 +120,26 @@ def main():
     for path in deleted:
         tree.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
     save_cache(blob_cache)
-    msg = ("Speechify single-voice narration (Kristy)\n\n"
-           "- One pre-generated voice (Kristy, Speechify simba-3.2) for the whole app;\n"
-           "  removed the Sarah/Brian picker (ParentDash shows the voice info).\n"
-           "- scripts/generate_audio_speechify.py: full catalog generated with Kristy;\n"
-           "  hash scheme unchanged (sha256(voice|text)[:32]).\n"
-           "- Removed orphaned ElevenLabs clips (public/audio/{sarah,brian}).\n"
-           "- build_audio_catalog/manifest/stage_audio now single-voice.\n"
-           "- narration.js: manifest-gated MP3 lookup (round 5) kept; safety-net\n"
-           "  404 caching; preload skips non-manifest hashes.\n"
-           "- Tests 109/109.")
+    msg = ("Fix spoken instructions: races, replay, catalog drift\n\n"
+           "- Readiness/LessonPre: parent greeting effects cut off the game's spoken\n"
+           "  question (child effects run first, narrate() stops current audio).\n"
+           "  The actionable direction now opens every screen.\n"
+           "- Reliable replay: speakSound() takes { noRecord }; choice speakers and\n"
+           "  delayed sounds no longer overwrite the 'Hear it again' slot.\n"
+           "- SameDifferent: delayed sounds cancelled on early answer; wrong-answer\n"
+           "  modeling via narrateQueue so replay re-speaks the whole explanation.\n"
+           "- BlendGame wording 'tap one circle' (not 'token'); chained on clip\n"
+           "  completion so sounds can't cut the next question.\n"
+           "- SessionEnd: narrateQueue of fixed parts instead of one dynamic string\n"
+           "  that forced the whole summary through Web Speech.\n"
+           "- Removed dynamic child-name speaks (Home) for fixed generic strings.\n"
+           "- Catalog builder: source-literal extraction safety net (scripts/\n"
+           "  speech_strings.mjs) — a reworded speak() can no longer silently lose\n"
+           "  its clip; stale directions fixed; Build-the-word x WORD_BANK enumerated.\n"
+           "- test/audio-coverage.test.mjs: drift guard fails CI when a spoken\n"
+           "  literal has no pre-generated clip in the manifest.\n"
+           "- 253 new Kristy clips; orphan-clip cleanup; rebuilt manifest.\n"
+           "- Tests 111/111.")
     # GitHub 502s on huge single trees: split into stacked commits of <=600 entries.
     CHUNK = 600
     parent, parent_tree = base, base_tree

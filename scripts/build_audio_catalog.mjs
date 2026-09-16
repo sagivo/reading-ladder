@@ -26,6 +26,12 @@ import {
   SEQ_ITEMS, BLEND_ITEMS, INVENTORY_SOUNDS,
   sequenceInstruction, blendWordChoices, inventoryChoices,
 } from '../src/lib/readiness.js';
+// Safety net against catalog drift: every plain string literal passed to the
+// narration API in src/ is picked up automatically, so a reworded speak()
+// can never again silently lose its pre-generated clip (the way the old
+// blend direction did). Interpolated templates still need hand enumeration
+// below — they're listed in the end-of-run report for review.
+import { extractSpokenLiterals } from './speech_strings.mjs';
 
 // The runtime (lib/narration.js audioUrl) hashes the RAW spoken string:
 //   sha256(`${voice}|${text}`).slice(0, 32)
@@ -76,7 +82,7 @@ for (const item of SEQ_ITEMS) {
   add(`${item.words[0]} ${item.words[1]}`, 'readiness-seq-choice');
   add(`${item.words[1]} ${item.words[0]}`, 'readiness-seq-choice');
 }
-add('Push one token for each sound you hear. Then tell me the word.', 'readiness-blend');
+add('Tap one circle for each sound you hear. Then tap the green button.', 'readiness-blend');
 for (const item of BLEND_ITEMS) {
   for (const c of blendWordChoices(item)) add(c.speak, 'readiness-blend-choice');
 }
@@ -108,17 +114,20 @@ add('Last game! Listen. cat. sun. Tap what you heard.', 'pre-order');
 add('Listen: dog … fish. Tap what you heard, in order.', 'pre-order');
 add('Listen: cat … sun. Tap what you heard, in order.', 'pre-order');
 for (const w of ['dog fish', 'fish dog', 'cat sun', 'sun cat']) add(w, 'pre-order-choice');
-add("Let's play with sounds!", 'pre-start');
 
 // ---------- 6. Early-reader lesson ----------
 add("Let's warm up. Tap the word you hear.", 'early-warmup');
+add('Tap the word you hear.', 'early-warmup'); // QuizStep instruction, re-spoken on retry
+for (const s of SOUNDS) add(`Which letter says /${s.say}/?`, 'early-review-retry'); // QuizStep instruction, re-spoken on retry
 for (const s of SOUNDS) {
-  add(`Today's new sound. This letter says ${s.say}, like ${s.keyword}. Say it with me: ${s.say}.`, 'early-new-sound');
+  add(`Today's new sound. This letter says ${s.say}, like ${s.keyword}. Say it with me: ${s.say}. When you can say it, tap the green button.`, 'early-new-sound');
   add(`Which one starts with ${s.say}? Tap it.`, 'early-first-sound');
   add(`Not yet. Find /${s.say}/.`, 'early-build');
   add(`Watch: tap ${s.g}. Now you do it.`, 'early-build');
   add(`You learned the sound ${s.say}.`, 'end-screen');
 }
+// Build step: the word is dynamic per lesson, but the bank is finite.
+for (const e of WORD_BANK) add(`Build the word ${e.w}. Tap the letters in order.`, 'early-build-word');
 add('Slide the sounds together. Then say the word fast.', 'early-blend');
 add('Now say it fast!', 'early-blend');
 add('Now read a real story. Tap each line to hear it, then read it yourself.', 'early-story');
@@ -145,6 +154,14 @@ add('Now you tap it.', 'quiz-feedback');
 for (const p of ['You did it!', 'You looked at every sound.', 'That was careful reading.', 'Your brain is growing!', 'You figured it out!', 'Good copying!']) {
   add(p, 'praise');
 }
+
+// ---------- 8b. Source-literal safety net (anti-drift) ----------
+// Every plain string literal handed to the narration API anywhere in src/
+// is catalogued automatically. If a speak() is reworded, its new string
+// shows up here with no hand-edit needed.
+const SRC_DIR = new URL('../src', import.meta.url).pathname;
+const { literals: srcLiterals, interpolated: interpSites } = extractSpokenLiterals(SRC_DIR);
+for (const text of srcLiterals.keys()) add(text, 'source-literal');
 
 // ---------- 9. Parent-gate / placement odds and ends ----------
 add('Try again, grown-up.', 'parent-gate');
@@ -207,4 +224,6 @@ for (const [c, s] of Object.entries(byCat).sort((a, b) => b[1].n - a[1].n)) {
 }
 console.log('\n--- dynamic (Web Speech fallback, never "missing") ---');
 for (const [t, why] of dynamic) console.log(`• ${t} — ${why}`);
+console.log('\n--- interpolated speak() sites (need hand enumeration above) ---');
+for (const s of interpSites) console.log(`• ${s.file}:${s.line} [${s.call}] "${s.preview}"`);
 console.log('\nfull catalog: /tmp/audio_catalog.json');

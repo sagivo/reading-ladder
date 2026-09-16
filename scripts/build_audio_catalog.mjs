@@ -2,9 +2,9 @@
 //
 // Enumerates EVERY string the app can speak through lib/narration.js,
 // computes the content-hash address for both voices
-//   sha256(voice + '|' + cleanSpokenText(text)).slice(0,32) + '.mp3'
-// and compares against the staged clips in
-// ~/workspace/reading-ladder-audio/{sarah,brian}/.
+//   sha256(voice + '|' + text).slice(0,32) + '.mp3'
+// (exactly what lib/narration.js audioUrl() computes at runtime) and
+// compares against the staged clips in public/audio/{sarah,brian}/.
 //
 // Two categories:
 //   FIXED  — finite strings; each must have a pre-generated MP3.
@@ -16,7 +16,6 @@
 // Writes: /tmp/audio_catalog.json (full list) + prints a coverage report.
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { SOUNDS, WORD_BANK, PREVIEW_WORDS } from '../src/lib/curriculum.js';
@@ -26,21 +25,27 @@ import {
   SEQ_ITEMS, BLEND_ITEMS, INVENTORY_SOUNDS,
   sequenceInstruction, blendWordChoices, inventoryChoices,
 } from '../src/lib/readiness.js';
-import { cleanSpokenText } from '../src/lib/narration.js';
+
+// The runtime (lib/narration.js audioUrl) hashes the RAW spoken string:
+//   sha256(`${voice}|${text}`).slice(0, 32)
+// so the catalog must hash exactly that — no cleaning — or the coverage
+// numbers lie. (An earlier revision imported a cleanSpokenText that never
+// existed in narration.js, which crashed this script outright.)
 
 const VOICES = ['sarah', 'brian'];
-const AUDIO_DIR = path.join(os.homedir(), 'workspace', 'reading-ladder-audio');
+// Clips ship in the repo under public/audio/ (vendored); override with
+// RL_AUDIO_DIR for a local staging folder.
+const AUDIO_DIR = process.env.RL_AUDIO_DIR || new URL('../public/audio', import.meta.url).pathname;
 
 const hash = (voice, text) =>
-  createHash('sha256').update(`${voice}|${cleanSpokenText(text)}`, 'utf8').digest('hex').slice(0, 32);
+  createHash('sha256').update(`${voice}|${text}`, 'utf8').digest('hex').slice(0, 32);
 
 const fixed = new Map();   // text -> Set(categories)
 const dynamic = new Map(); // template -> reason
 function add(text, cat) {
-  const clean = cleanSpokenText(text);
-  if (!clean) return;
-  if (!fixed.has(clean)) fixed.set(clean, new Set());
-  fixed.get(clean).add(cat);
+  if (!text) return;
+  if (!fixed.has(text)) fixed.set(text, new Set());
+  fixed.get(text).add(cat);
 }
 function addDynamic(template, reason) {
   dynamic.set(template, reason);

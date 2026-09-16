@@ -33,7 +33,9 @@ export function celebrate(text) {
   // Hold the narration channel so the incoming question's instruction
   // waits instead of cutting the praise off mid-word.
   holdNarration(PRAISE_MS);
-  // Fire-and-forget: the lesson has already advanced; audio must never
-  // block or be blocked by the transition.
-  narrate(text, { ignoreHold: true, noRecord: true }).catch(() => {});
+  // The overlay keeps the emoji; the spoken clip is the clean string the
+  // audio catalog generates (emoji-stripped), otherwise the content hash
+  // never matches a pre-generated MP3 and praise always falls back.
+  const spoken = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, '').replace(/\s{2,}/g, ' ').trim();
+  narrate(spoken || text, { ignoreHold: true, noRecord: true }).catch(() => {});
 }

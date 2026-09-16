@@ -109,6 +109,7 @@ function FirstSounds({ sounds, L, onDone }) {
     <QuizStep
       key={round}
       instruction={instruction}
+      speakInstruction={false}
       choices={shuffle([
         { id: 'yes', label: item[1], sub: item[0], speak: item[0] },
         { id: 'no', label: wrong[1], sub: wrong[0], speak: wrong[0] },
@@ -139,6 +140,7 @@ function LetterPair({ sounds, L, onDone }) {
       <QuizStep
         key={round}
         instruction={instruction}
+        speakInstruction={false}
         choices={shuffle([
           { id: target.g, label: target.g, speak: `the letter ${target.g}` },
           ...distract.map((d) => ({ id: d.g, label: d.g, speak: `the letter ${d.g}` })),

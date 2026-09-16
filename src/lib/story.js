@@ -72,6 +72,20 @@ function capitalize(s) {
 }
 
 /**
+ * Deterministic seeded RNG (mulberry32). Used by lesson.js so a story can be
+ * regenerated identically from a stored seed.
+ */
+export function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
  * Generate a short decodable story for `stage`.
  * Returns { sentences:[{text, words:[{w, emoji?}]}], nouns:[...], question }.
  * Throws if no decodable story can be built (never show a bad story).

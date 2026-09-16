@@ -4,6 +4,7 @@
 // the API by the sync engine when online.
 
 const KEY = 'reading-ladder-v1';
+const CLAIM_DISMISSED_KEY = 'reading-ladder-claim-dismissed';
 
 export function loadStore() {
   try {
@@ -12,12 +13,21 @@ export function loadStore() {
       const s = JSON.parse(raw);
       s.profiles = s.profiles || {};
       s.queue = s.queue || [];
+      s.parentId = s.parentId || null;
+      s.parentEmail = s.parentEmail || null;
+      // Normalize profiles written before parent accounts existed.
+      for (const p of Object.values(s.profiles)) {
+        if (p.claimed === undefined) p.claimed = false; // owned by the signed-in parent's account?
+        if (p.birthYear === undefined) p.birthYear = null;
+        if (p.archived === undefined) p.archived = false;
+        if (p.serverPending === undefined) p.serverPending = false;
+      }
       return s;
     }
   } catch {
     /* corrupted storage -> start fresh */
   }
-  return { profiles: {}, queue: [], lastSyncAt: null };
+  return { profiles: {}, queue: [], lastSyncAt: null, parentId: null, parentEmail: null };
 }
 
 export function saveStore(store) {
@@ -44,6 +54,10 @@ export function newProfile(name, avatar) {
     sessions: [],
     exposure: 0, // pre-reader: how many sounds have been introduced
     lastMission: null,
+    birthYear: null, // optional; used only to suggest a starting track
+    claimed: false, // true once the profile belongs to the signed-in parent's account
+    serverPending: false, // created offline while logged in; claim flow attaches it later
+    archived: false, // soft-archived by the parent (hidden from kids, restorable)
     createdAt: now,
     updatedAt: now,
   };
@@ -81,4 +95,23 @@ export function pendingCount(store) {
 export function ackEvents(store, ids) {
   const set = new Set(ids);
   store.queue = store.queue.filter((e) => !set.has(e.id));
+}
+
+/** Profile ids the parent chose NOT to claim ("Skip" in the claim flow). */
+export function loadDismissedClaimIds() {
+  try {
+    const raw = typeof localStorage !== 'undefined' && localStorage.getItem(CLAIM_DISMISSED_KEY);
+    const ids = raw ? JSON.parse(raw) : [];
+    return Array.isArray(ids) ? ids : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveDismissedClaimIds(ids) {
+  try {
+    localStorage.setItem(CLAIM_DISMISSED_KEY, JSON.stringify(ids));
+  } catch {
+    /* ignore */
+  }
 }

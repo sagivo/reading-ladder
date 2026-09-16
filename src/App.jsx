@@ -1,12 +1,20 @@
 // The Reading Ladder — app orchestrator.
-// State-based screens (no router): home -> readiness -> placement ->
-// lesson -> end, plus parent dashboard and companion picker.
+// State-based screens (no router): auth -> claim -> home -> readiness ->
+// placement -> lesson -> end, plus parent dashboard, kid management,
+// and companion picker.
+//
+// Parent-gated: on launch the app verifies the parent session via
+// GET /api/auth/me. No kid access at all until a parent is signed in.
 // Local-first: the store in localStorage is the source of truth during a
 // lesson; progress events queue up and sync to D1 via Pages Functions
-// when online (see lib/sync.js).
+// when online (see lib/sync.js). Only profiles claimed by the signed-in
+// parent sync; unclaimed device profiles wait for the claim flow.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Home from './components/Home.jsx';
+import Auth from './components/Auth.jsx';
+import Claim from './components/Claim.jsx';
+import Kids from './components/Kids.jsx';
 import Readiness from './components/Readiness.jsx';
 import Placement from './components/Placement.jsx';
 import LessonEarly from './components/LessonEarly.jsx';
@@ -14,16 +22,37 @@ import LessonPre from './components/LessonPre.jsx';
 import SessionEnd from './components/SessionEnd.jsx';
 import ParentDash from './components/ParentDash.jsx';
 import Companion from './components/Companion.jsx';
-import { loadStore, saveStore, newProfile, touchProfile, queueEvent } from './lib/store.js';
-import { mergeOnLaunch, syncNow, getSyncState } from './lib/sync.js';
+import { Screen, Title, Subtitle } from './components/ui.jsx';
+import { loadStore, saveStore, touchProfile, queueEvent, loadDismissedClaimIds } from './lib/store.js';
+import { mergeOnLaunch, syncNow } from './lib/sync.js';
+import { getMe, logout, listProfiles, isAuthError } from './lib/auth.js';
 import { buildEarlyLesson, buildPreLesson } from './lib/lesson.js';
 import { recordAttempt, newSoundMastery, addMiss, clearMiss, nextTargetIndex, isMastered } from './lib/mastery.js';
 import { SOUNDS, ACCESSORIES } from './lib/curriculum.js';
 import { setSoundEnabled } from './lib/speech.js';
 
+function OfflineBanner() {
+  return (
+    <div style={{
+      background: '#fff7d6', borderBottom: '3px solid #f5b301',
+      padding: '10px 16px', fontSize: 18, fontWeight: 700, textAlign: 'center',
+      fontFamily: '-apple-system, "Segoe UI", system-ui, sans-serif', color: '#2d2a45',
+    }}>
+      📴 You're offline — play continues, progress will sync later.
+    </div>
+  );
+}
+
 export default function App() {
   const [store, setStore] = useState(() => loadStore());
-  const [screen, setScreen] = useState('home');
+  const [screen, setScreen] = useState('checking'); // checking|auth|claim|home|kids|readiness|placement|lesson|end|companion|parent
+  const [parent, setParent] = useState(null);
+  const parentRef = useRef(null);
+  const [authNotice, setAuthNotice] = useState(null); // 'expired' | 'offline' | null
+  const [claimIds, setClaimIds] = useState(null);
+  const [online, setOnline] = useState(
+    typeof navigator === 'undefined' ? true : navigator.onLine !== false
+  );
   const [activeId, setActiveId] = useState(null);
   const [plan, setPlan] = useState(null);
   const [summary, setSummary] = useState(null);
@@ -31,20 +60,146 @@ export default function App() {
   const [soundOn, setSoundOn] = useState(true);
   const [newAccessory, setNewAccessory] = useState(null);
 
-  // Launch: merge server state (last-write-wins per profile), then push queue.
+  function setParentBoth(p) {
+    parentRef.current = p;
+    setParent(p);
+  }
+
+  /** Session is gone: drop to the parent sign-in screen. */
+  function handleSessionExpired() {
+    setParentBoth(null);
+    setActiveId(null);
+    setClaimIds(null);
+    setAuthNotice('expired');
+    setScreen('auth');
+  }
+
+  // ---- launch: verify parent session, then merge + claim check ----
+  async function maybeClaim() {
+    if (!parentRef.current) return;
+    let serverIds = [];
+    try {
+      const r = await listProfiles();
+      serverIds = (r.profiles || []).map((p) => p.id);
+    } catch (e) {
+      if (isAuthError(e)) {
+        handleSessionExpired();
+        return;
+      }
+      console.warn('claim check failed', e);
+      return;
+    }
+    const inServer = new Set(serverIds);
+    const dismissed = new Set(loadDismissedClaimIds());
+    const s = loadStore();
+    const cands = Object.values(s.profiles).filter(
+      (p) => !p.claimed && !inServer.has(p.id) && !dismissed.has(p.id)
+    );
+    if (cands.length > 0) {
+      setClaimIds(cands.map((p) => p.id));
+      setScreen('claim');
+    }
+  }
+
+  async function handleAuthed(p) {
+    setParentBoth(p);
+    setAuthNotice(null);
+    commit((s) => {
+      s.parentId = p.id;
+      s.parentEmail = p.email;
+    });
+    setScreen('checking');
+    try {
+      const r = await mergeOnLaunch(p.id);
+      setStore({ ...r.store });
+      if (r.auth) {
+        handleSessionExpired();
+        return;
+      }
+      try {
+        await syncNow();
+      } catch (e) {
+        if (isAuthError(e)) {
+          handleSessionExpired();
+          return;
+        }
+        // Offline or server hiccup: carry on with on-device data.
+        console.warn('launch sync failed', e);
+      }
+      setStore({ ...loadStore() });
+      await maybeClaim();
+      setScreen((prev) => (prev === 'checking' ? 'home' : prev)); // maybeClaim may have set 'claim'
+    } catch (e) {
+      console.warn('launch failed', e);
+      if (isAuthError(e)) handleSessionExpired();
+      else setScreen('home');
+    }
+  }
+
+  async function doLogout() {
+    try {
+      await logout();
+    } catch (e) {
+      console.warn('logout failed', e);
+    }
+    commit((s) => {
+      s.parentId = null;
+      s.parentEmail = null;
+    });
+    setParentBoth(null);
+    setActiveId(null);
+    setClaimIds(null);
+    setAuthNotice(null);
+    setScreen('auth');
+  }
+
   useEffect(() => {
     let cancelled = false;
-    mergeOnLaunch().then((r) => {
-      if (cancelled) return;
-      setStore({ ...r.store });
-      return syncNow();
-    }).catch(() => {});
-    const onOnline = () => syncNow().catch(() => {});
+    (async () => {
+      try {
+        const me = await getMe();
+        if (cancelled) return;
+        await handleAuthed(me.parent);
+      } catch (e) {
+        if (cancelled) return;
+        if (isAuthError(e)) {
+          setParentBoth(null);
+          setAuthNotice(null);
+          setScreen('auth');
+        } else {
+          console.warn('auth check failed', e);
+          const s = loadStore();
+          if (s.parentId) {
+            // Offline (or server hiccup) with a previous session on this
+            // device: carry on with on-device data. No kid access is granted
+            // without a prior parent login.
+            setParentBoth({ id: s.parentId, email: s.parentEmail });
+            setScreen('home');
+          } else {
+            setAuthNotice('offline');
+            setScreen('auth');
+          }
+        }
+      }
+    })();
+    const onOnline = () => {
+      setOnline(true);
+      syncNow()
+        .then(() => setStore({ ...loadStore() }))
+        .catch((e) => {
+          if (isAuthError(e)) handleSessionExpired();
+        });
+      maybeClaim();
+    };
+    const onOffline = () => setOnline(false);
     window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
     return () => {
       cancelled = true;
       window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function commit(mutator) {
@@ -73,6 +228,7 @@ export default function App() {
   }
 
   const profiles = Object.values(store.profiles);
+  const activeProfiles = profiles.filter((p) => !p.archived);
   const profile = activeId ? store.profiles[activeId] : null;
 
   // ---- trial recording (mastery state machine + miss queue) ----
@@ -121,23 +277,12 @@ export default function App() {
   };
 
   // ---- flows ----
-  function createProfile(name, avatar) {
-    const p = newProfile(name, avatar);
-    commit((s) => {
-      s.profiles[p.id] = p;
-      queueEvent(s, p.id, 'profile_created', { name, avatar });
-      saveStore(s);
-    });
-    setActiveId(p.id);
-    syncNow().catch(() => {});
-  }
-
   function selectProfile(id, startLesson = false) {
     setActiveId(id);
     if (startLesson) {
       const p = store.profiles[id];
-      if (p && !p.placement) setScreen('readiness');
-      else if (p) beginLesson(p);
+      if (p && !p.archived && !p.placement) setScreen('readiness');
+      else if (p && !p.archived) beginLesson(p);
     }
   }
 
@@ -177,7 +322,9 @@ export default function App() {
     setNewAccessory(unlocked);
     setSummary({ ...sum, minutes });
     setScreen('end');
-    syncNow().catch(() => {});
+    syncNow().catch((e) => {
+      if (isAuthError(e)) handleSessionExpired();
+    });
   }
 
   function readinessDone(placement) {
@@ -188,13 +335,17 @@ export default function App() {
     });
     log(activeId, 'track_set', { track: placement.track, placement });
     setScreen('placement');
-    syncNow().catch(() => {});
+    syncNow().catch((e) => {
+      if (isAuthError(e)) handleSessionExpired();
+    });
   }
 
   function overrideTrack(id, track) {
     updateProfile(id, (p) => { p.track = track; });
     log(id, 'track_set', { track, overridden: true });
-    syncNow().catch(() => {});
+    syncNow().catch((e) => {
+      if (isAuthError(e)) handleSessionExpired();
+    });
   }
 
   function goHome() {
@@ -202,23 +353,57 @@ export default function App() {
     setPlan(null);
   }
 
-  const syncBadge = getSyncState();
+  const parentScreens = ['home', 'kids', 'parent', 'claim'];
+  const showOffline = !online && parentScreens.includes(screen);
 
   return (
     <>
+      {showOffline && <OfflineBanner />}
+      {screen === 'checking' && (
+        <Screen>
+          <div style={{ fontSize: 64 }}>🪜📖</div>
+          <Title>The Reading Ladder</Title>
+          <Subtitle>Loading…</Subtitle>
+        </Screen>
+      )}
+      {screen === 'auth' && (
+        <Auth notice={authNotice} onAuthed={handleAuthed} />
+      )}
+      {screen === 'claim' && claimIds && (
+        <Claim
+          ids={claimIds}
+          store={store}
+          commit={commit}
+          onDone={() => {
+            setClaimIds(null);
+            setStore({ ...loadStore() });
+            setScreen('home');
+          }}
+          onSessionExpired={handleSessionExpired}
+        />
+      )}
       {screen === 'home' && (
         <Home
-          profiles={profiles}
+          profiles={activeProfiles}
           activeId={activeId}
           onSelect={selectProfile}
-          onCreate={createProfile}
           onParent={() => setScreen('parent')}
+          onManageKids={() => setScreen('kids')}
           soundOn={soundOn}
           onToggleSound={() => {
             const v = !soundOn;
             setSoundOn(v);
             setSoundEnabled(v);
           }}
+        />
+      )}
+      {screen === 'kids' && (
+        <Kids
+          store={store}
+          commit={commit}
+          onBack={goHome}
+          onStartKid={(id) => selectProfile(id, true)}
+          onSessionExpired={handleSessionExpired}
         />
       )}
       {screen === 'readiness' && profile && (
@@ -260,11 +445,15 @@ export default function App() {
       {screen === 'parent' && (
         <ParentDash
           store={store}
-          profiles={profiles}
-          activeId={activeId || (profiles[0] && profiles[0].id)}
+          profiles={activeProfiles}
+          activeId={activeId || (activeProfiles[0] && activeProfiles[0].id)}
           onSelectProfile={setActiveId}
           onOverrideTrack={overrideTrack}
           onBack={goHome}
+          parent={parent}
+          onLogout={doLogout}
+          onManageKids={() => setScreen('kids')}
+          onSessionExpired={handleSessionExpired}
         />
       )}
     </>

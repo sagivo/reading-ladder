@@ -1,12 +1,12 @@
-// Home: profile picker + kid-friendly profile creation + lesson entry.
-// No adult signup/auth — family-device scenario: kid taps their name.
+// Home: profile picker + lesson entry.
+// Kid-facing, but the whole app sits behind the parent's login (App.jsx
+// auth gate), so no kid access is possible without a signed-in parent.
+// Adding/editing readers moved to the parent-only Kids screen.
 
-import React, { useState } from 'react';
-import { Screen, BigButton, Title, Subtitle, ChoiceButton } from './ui.jsx';
+import React from 'react';
+import { Screen, BigButton, Title, Subtitle } from './ui.jsx';
 import { speak } from '../lib/speech.js';
 import { COMPANIONS, COMPANION_COLORS, ACCESSORIES } from '../lib/curriculum.js';
-
-const AVATARS = ['🦊', '🐰', '🦉', '🐢', '🐵', '🐼', '🐯', '🦁', '🐸', '🐙', '🦄', '🐝'];
 
 export function companionEmoji(c) {
   const a = COMPANIONS.find((x) => x.id === c.animal) || COMPANIONS[0];
@@ -47,56 +47,8 @@ function ProfileCard({ p, onTap }) {
   );
 }
 
-function CreateProfile({ onCreate, onCancel, hasProfiles }) {
-  const [name, setName] = useState('');
-  const [avatar, setAvatar] = useState(AVATARS[0]);
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, width: '100%' }}>
-      <Title>{hasProfiles ? 'Add a reader' : "Who's reading today?"}</Title>
-      <Subtitle>A grown-up can type the name. Then the reader picks a face.</Subtitle>
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Name"
-        maxLength={20}
-        style={{
-          fontSize: 28, padding: '14px 20px', borderRadius: 20, border: '4px solid #d9d4f5',
-          width: '100%', maxWidth: 340, textAlign: 'center',
-        }}
-      />
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 420 }}>
-        {AVATARS.map((a) => (
-          <button
-            key={a}
-            onClick={() => setAvatar(a)}
-            style={{
-              width: 64, height: 64, fontSize: 34, borderRadius: 18, cursor: 'pointer',
-              border: avatar === a ? '5px solid #7c5cd6' : '3px solid #e4e0f7', background: '#fff',
-            }}
-          >{a}</button>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 14 }}>
-        {hasProfiles && <BigButton small color="#9a94c7" onClick={onCancel}>Back</BigButton>}
-        <BigButton
-          small
-          disabled={!name.trim()}
-          onClick={() => onCreate(name.trim(), avatar)}
-        >
-          Start reading 📚
-        </BigButton>
-      </div>
-    </div>
-  );
-}
-
-export default function Home({ profiles, activeId, onSelect, onCreate, onParent, soundOn, onToggleSound }) {
-  const [creating, setCreating] = useState(profiles.length === 0);
+export default function Home({ profiles, activeId, onSelect, onParent, onManageKids, soundOn, onToggleSound }) {
   const active = profiles.find((p) => p.id === activeId);
-
-  React.useEffect(() => {
-    if (profiles.length === 0) setCreating(true);
-  }, [profiles.length]);
 
   return (
     <Screen>
@@ -111,19 +63,18 @@ export default function Home({ profiles, activeId, onSelect, onCreate, onParent,
       <div style={{ fontSize: 64 }}>🪜📖</div>
       <Title>The Reading Ladder</Title>
 
-      {creating ? (
-        <CreateProfile
-          hasProfiles={profiles.length > 0}
-          onCancel={() => setCreating(false)}
-          onCreate={(name, avatar) => { setCreating(false); onCreate(name, avatar); }}
-        />
+      {profiles.length === 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}>
+          <Subtitle>No readers yet — a grown-up can add the first reader to begin.</Subtitle>
+          <BigButton onClick={onManageKids}>+ Add a reader</BigButton>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
           {profiles.map((p) => (
             <ProfileCard key={p.id} p={p} onTap={() => { speak(`Hi ${p.name}!`); onSelect(p.id); }} />
           ))}
           <button
-            onClick={() => setCreating(true)}
+            onClick={onManageKids}
             style={{
               padding: 14, borderRadius: 24, border: '4px dashed #b9b3d6', background: 'transparent',
               fontSize: 22, fontWeight: 700, color: '#7c5cd6', cursor: 'pointer',
@@ -132,7 +83,7 @@ export default function Home({ profiles, activeId, onSelect, onCreate, onParent,
         </div>
       )}
 
-      {active && !creating && (
+      {active && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, marginTop: 8 }}>
           <BigButton
             color="#22a06b"

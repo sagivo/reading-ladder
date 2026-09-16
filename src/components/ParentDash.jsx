@@ -1,6 +1,7 @@
 // Parent dashboard: adult-gated, read-only.
 // Answers four questions: what can my child do, where are they stuck,
 // how much screen time, what comes next. Plus sync status.
+// Parent-only: sits behind the app's parent-login gate AND the math gate below.
 
 import React, { useState } from 'react';
 import { Screen, BigButton, Title, Subtitle, ChoiceButton } from './ui.jsx';
@@ -8,6 +9,7 @@ import { speak } from '../lib/speech.js';
 import { SOUNDS, PREVIEW_WORDS } from '../lib/curriculum.js';
 import { nextTargetIndex, pendingMisses } from '../lib/mastery.js';
 import { getSyncState, syncNow } from '../lib/sync.js';
+import { isAuthError, friendlyError } from '../lib/auth.js';
 import { pendingCount } from '../lib/store.js';
 
 function Gate({ onPass, onCancel }) {
@@ -47,8 +49,9 @@ function Card({ title, children }) {
   );
 }
 
-function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBack, store, refreshSync }) {
+function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBack, store, refreshSync, parent, onLogout, onManageKids, onSessionExpired }) {
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState(null);
   const sync = { ...getSyncState(), pending: pendingCount(store) };
   const p = profiles.find((x) => x.id === activeId) || profiles[0];
 
@@ -70,33 +73,53 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBac
 
   async function doSync() {
     setSyncing(true);
-    await syncNow();
-    setSyncing(false);
-    refreshSync();
+    setSyncError(null);
+    try {
+      await syncNow();
+    } catch (e) {
+      if (isAuthError(e)) {
+        onSessionExpired();
+        return;
+      }
+      console.warn('manual sync failed', e);
+      setSyncError(friendlyError(e));
+    } finally {
+      setSyncing(false);
+      refreshSync();
+    }
   }
 
   const syncLabel =
+    sync.state === 'auth' ? '🔒 Signed out — please sign in again' :
     sync.state === 'syncing' || syncing ? '🔄 Syncing…' :
     sync.pending > 0 ? `📴 Offline — ${sync.pending} event${sync.pending === 1 ? '' : 's'} waiting to sync` :
     sync.state === 'offline' ? '📴 Offline — will sync when connected' :
     '✅ Synced';
 
+  const shownError = syncError || (sync.state !== 'auth' ? sync.error : null);
+
   return (
     <Screen>
-      <div style={{ width: '100%', display: 'flex', gap: 10, alignItems: 'center' }}>
+      <div style={{ width: '100%', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <BigButton small color="#9a94c7" onClick={onBack}>‹ Back</BigButton>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {profiles.map((x) => (
-            <button
-              key={x.id}
-              onClick={() => onSelectProfile(x.id)}
-              style={{
-                padding: '8px 16px', borderRadius: 16, fontSize: 18, fontWeight: 700, cursor: 'pointer',
-                border: x.id === p.id ? '4px solid #7c5cd6' : '3px solid #e4e0f7', background: '#fff',
-              }}
-            >{x.avatar} {x.name}</button>
-          ))}
-        </div>
+        <BigButton small onClick={onManageKids}>👥 Manage kids</BigButton>
+        <div style={{ flex: 1 }} />
+        <BigButton small color="#b0655a" onClick={onLogout}>🚪 Log out</BigButton>
+      </div>
+      {parent && parent.email && (
+        <div style={{ fontSize: 16, color: '#5b567d' }}>Signed in as {parent.email}</div>
+      )}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+        {profiles.map((x) => (
+          <button
+            key={x.id}
+            onClick={() => onSelectProfile(x.id)}
+            style={{
+              padding: '8px 16px', borderRadius: 16, fontSize: 18, fontWeight: 700, cursor: 'pointer',
+              border: x.id === (p && p.id) ? '4px solid #7c5cd6' : '3px solid #e4e0f7', background: '#fff',
+            }}
+          >{x.avatar} {x.name}</button>
+        ))}
       </div>
 
       <Title>{p.avatar} {p.name} <span style={{ fontSize: 20, fontWeight: 600, color: '#5b567d' }}>
@@ -105,8 +128,8 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onBac
 
       <Card title="🔄 Sync status">
         <div style={{ fontSize: 19 }}>{syncLabel}</div>
-        {sync.error && <div style={{ fontSize: 16, color: '#a33' }}>{sync.error}</div>}
-        {sync.pending > 0 && <div style={{ marginTop: 8 }}><BigButton small onClick={doSync}>Sync now</BigButton></div>}
+        {shownError && <div style={{ fontSize: 16, color: '#a33', marginTop: 6 }}>{shownError}</div>}
+        {(sync.pending > 0 || shownError) && <div style={{ marginTop: 8 }}><BigButton small onClick={doSync} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now 🔄'}</BigButton></div>}
         <div style={{ fontSize: 15, color: '#5b567d', marginTop: 8 }}>
           Lessons always work offline. Progress is stored on this device first, then synced to the family database when connected.
         </div>

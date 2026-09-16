@@ -57,6 +57,13 @@ export function Title({ children }) {
   return <h1 style={{ fontSize: 34, textAlign: 'center', margin: '8px 0', lineHeight: 1.25 }}>{children}</h1>;
 }
 
+/** Human label for a learner track. */
+export function trackLabel(track) {
+  return track === 'early' ? '📖 Early reader'
+    : track === 'pre' ? '👂 Listening reader'
+    : '✨ New reader';
+}
+
 export function Subtitle({ children }) {
   return <p style={{ fontSize: 22, textAlign: 'center', margin: 0, color: '#5b567d', lineHeight: 1.4 }}>{children}</p>;
 }

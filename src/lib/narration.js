@@ -1,17 +1,20 @@
-// Narration: ElevenLabs MP3-first audio with layered fallbacks.
+// Narration: Speechify MP3-first audio with layered fallbacks.
 //
-// Primary: pre-generated MP3s in R2, addressed by content hash:
-//   {AUDIO_BASE_URL}/audio/{voice}/{sha256(voice + '|' + text).slice(0,32)}.mp3
+// Primary: pre-generated MP3s, addressed by content hash:
+//   /audio/kristy/{sha256("kristy|" + text).slice(0,32)}.mp3
 // The hash is computed client-side from the exact string, so no manifest
-// lookup is needed at runtime. Every fixed string + the full seeded story
-// pool is pre-generated (scripts/build_manifest.mjs); the runtime never
-// calls ElevenLabs TTS during normal use.
+// lookup is needed at runtime. Every fixed narration string is pre-generated
+// with the single Kristy voice (scripts/generate_audio_speechify.py); the
+// runtime never calls Speechify TTS during normal use.
 //
 // Fallback chain per clip:
-//   1. R2 MP3 (HTMLAudio)
-//   2. Safety net: POST /api/audio {text, voice} — generates, caches in R2,
-//      and LOGS the miss server-side so we can backfill the manifest.
-//   3. Web Speech (speechSynthesis) — last resort only.
+//   1. Stored MP3 (HTMLAudio), only fetched when the hash is in the
+//      pre-generated manifest (scripts/build_audio_manifest.mjs) — this
+//      avoids dead air from fetching missing clips.
+//   2. Safety net: POST /api/audio {text} — 404 in production; caches the
+//      verdict so we never retry a known-missing clip.
+//   3. Web Speech (speechSynthesis) — last resort only, used solely for the
+//      genuinely dynamic end-of-lesson summary (live stats + offline mission).
 //
 // API: setVoice/getVoice, narrate(text), narrateQueue([texts]),
 //      narrateParts for composed utterances, stop(), preload(texts),
@@ -20,12 +23,13 @@
 import { speak as webSpeak, stop as webStop, setSoundEnabled as setWebSoundEnabled } from './speech.js';
 import { AUDIO_MANIFEST } from './audioManifest.js';
 
+// Single narration voice: Kristy (Speechify) — warm, clear, e-learning.
+// All clips are pre-generated under public/audio/kristy/.
 export const VOICES = {
-  sarah: { label: 'Sarah', hint: 'Warm feminine voice' },
-  brian: { label: 'Brian', hint: 'Warm masculine voice' },
+  kristy: { label: 'Kristy', hint: 'Warm teacher voice' },
 };
 export const VOICE_IDS = Object.keys(VOICES);
-export const DEFAULT_VOICE = 'sarah';
+export const DEFAULT_VOICE = 'kristy';
 
 // Clips ship WITH the app as static assets (scripts/stage_audio.mjs copies
 // the pre-generated MP3s into dist/audio/ at build time), so the primary

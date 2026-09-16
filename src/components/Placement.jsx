@@ -14,8 +14,8 @@ export default function Placement({ profile, onStart, onOverride, onHome }) {
   useEffect(() => {
     stop();
     speak(early
-      ? `${profile.name}, you are ready to be an early reader! You will learn letter sounds and read real words.`
-      : `${profile.name}, you are a listening reader! You will play sound games and learn letter sounds by ear.`);
+      ? 'You are ready to be an early reader! You will learn letter sounds and read real words.'
+      : 'You are a listening reader! You will play sound games and learn letter sounds by ear.');
   }, []);
 
   return (

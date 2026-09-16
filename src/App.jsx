@@ -279,10 +279,10 @@ export default function App() {
   const activeProfiles = profiles.filter((p) => !p.archived);
   const profile = activeId ? store.profiles[activeId] : null;
 
-  // Narration follows the kid's chosen voice (Sarah default).
+  // Narration uses the single pre-generated voice (Kristy).
   useEffect(() => {
-    setVoice(profile && profile.voice ? profile.voice : DEFAULT_VOICE);
-  }, [activeId, profile && profile.voice]);
+    setVoice(DEFAULT_VOICE);
+  }, [activeId]);
 
   // ---- trial recording (mastery state machine + miss queue) ----
   const recordTrial = useCallback(({ grapheme, word, format, transfer, result, pre }) => {
@@ -430,14 +430,6 @@ export default function App() {
   /** Persist readiness-check position as the child plays (for resume). */
   function handleReadinessProgress(game, results) {
     if (activeId) saveReadinessProgress(activeId, game, results);
-  }
-
-  function setProfileVoice(id, voice) {
-    updateProfile(id, (p) => { p.voice = voice === 'brian' ? 'brian' : 'sarah'; });
-    log(id, 'voice_set', { voice });
-    syncNow().catch((e) => {
-      if (isAuthError(e)) handleSessionExpired();
-    });
   }
 
   function overrideTrack(id, track) {
@@ -592,7 +584,6 @@ export default function App() {
           activeId={activeId || (activeProfiles[0] && activeProfiles[0].id)}
           onSelectProfile={setActiveId}
           onOverrideTrack={overrideTrack}
-          onSetVoice={setProfileVoice}
           onBack={goHome}
           parent={parent}
           onLogout={doLogout}

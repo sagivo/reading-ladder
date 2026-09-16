@@ -21,7 +21,7 @@ export default function SessionEnd({ profile, summary, unlockedAccessory, onDone
     const missionBit = summary.mission
       ? ` Time for a real-world mission. ${summary.mission} Tell a grown-up when you've done it.`
       : '';
-    speak(`All done, ${profile.name}! ` + bits.join(' ') + missionBit + ' Tap Done to finish.');
+    speak('All done! ' + bits.join(' ') + missionBit + ' Tap Done to finish.');
   }, []);
 
   const acc = ACCESSORIES.find((a) => a.id === unlockedAccessory);

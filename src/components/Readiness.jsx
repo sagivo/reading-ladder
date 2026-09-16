@@ -182,9 +182,9 @@ function InventoryGame({ onDone }) {
 }
 
 // ---------- Orchestrator ----------
-export default function Readiness({ profile, onDone, onHome }) {
-  const [game, setGame] = useState(0);
-  const [results, setResults] = useState({});
+export default function Readiness({ profile, onDone, onHome, initialGame = 0, initialResults = {}, onProgress }) {
+  const [game, setGame] = useState(initialGame);
+  const [results, setResults] = useState(initialResults);
 
   useEffect(() => {
     speak(`Hi ${profile.name}! Let's play three listening games.`);
@@ -194,7 +194,10 @@ export default function Readiness({ profile, onDone, onHome }) {
     const res = { ...results, ...r };
     setResults(res);
     if (game < 2) {
-      setGame(game + 1);
+      const ng = game + 1;
+      setGame(ng);
+      // Persist position so a reload offers "Continue check" (mirrors lesson resume).
+      if (onProgress) onProgress(ng, res);
     } else {
       // Placement rule: order awareness + oral blending + letter inventory.
       const track = res.seq >= 1 && res.blend >= 1 && res.letters >= 3 ? 'early' : 'pre';

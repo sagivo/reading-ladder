@@ -320,3 +320,49 @@ test('client: mixed queue — syncable failures stay honest, unclaimed stay visi
   assert.equal(st.unclaimedPending, 1, 'unclaimed count still surfaced');
   assert.deepEqual(queueIds().sort(), ['s1', 'u1']);
 });
+
+// ---- blocked profiles (owned by another account): honest 'blocked' state ----
+function seedBlockedStore() {
+  mem.clear();
+  const store = loadStore();
+  const p = newProfile('Kid', '🦊');
+  p.id = 'p1';
+  p.claimed = false;
+  p.claimBlocked = 'owned_by_another_account';
+  store.profiles.p1 = p;
+  for (const id of ['b1', 'b2']) queueEvent(store, 'p1', 'trial', { id });
+  store.queue.forEach((e, i) => { e.id = ['b1', 'b2'][i]; });
+  saveStore(store);
+  return store;
+}
+
+test('client: blocked profiles produce an honest blocked state, never a silent stall', async () => {
+  seedBlockedStore();
+  fetchHandler = async () => jsonRes({ acked: [], failed: [] });
+  const r = await syncNow(true);
+  assert.equal(r.ok, true); // no-op, but honest
+  const st = getSyncState();
+  assert.equal(st.state, 'blocked');
+  assert.equal(st.blockedPending, 2);
+  assert.equal(st.unclaimedPending, 0);
+  assert.match(st.error, /different account/);
+  assert.deepEqual(queueIds(), ['b1', 'b2']); // kept on device, not dropped
+});
+
+test('client: mixed unclaimed + blocked stays unclaimed (claim CTA still relevant)', async () => {
+  mem.clear();
+  const store = loadStore();
+  const p1 = newProfile('Kid1', '🦊'); p1.id = 'p1'; p1.claimed = false;
+  const p2 = newProfile('Kid2', '🦊'); p2.id = 'p2'; p2.claimed = false;
+  p2.claimBlocked = 'owned_by_another_account';
+  store.profiles.p1 = p1; store.profiles.p2 = p2;
+  queueEvent(store, 'p1', 'trial', {}); store.queue[0].id = 'u1';
+  queueEvent(store, 'p2', 'trial', {}); store.queue[1].id = 'b1';
+  saveStore(store);
+  fetchHandler = async () => jsonRes({ acked: [], failed: [] });
+  await syncNow(true);
+  const st = getSyncState();
+  assert.equal(st.state, 'unclaimed');
+  assert.equal(st.unclaimedPending, 1);
+  assert.equal(st.blockedPending, 1);
+});

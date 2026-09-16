@@ -1,7 +1,9 @@
-// POST /api/auth/adopt { profiles: [...toServer shapes] } -> 200 { adopted: [ids] }
+// POST /api/auth/adopt { profiles: [...toServer shapes] } -> 200 { adopted: [ids], skipped: [{id,name,reason}] }
 // Claims locally-created (unclaimed, parent_id IS NULL) profiles for the signed-in
 // parent after signup/login. Each profile is upserted ONLY when it is unclaimed or
-// already belongs to the caller; rows owned by another parent are skipped.
+// already belongs to the caller; rows owned by another parent are skipped AND
+// reported (the client used to close the dialog silently on adopted: [], leaving
+// the import prompt nagging every launch with no explanation).
 // Capped at 20 profiles per call.
 
 import { json, db, logError, UPSERT_PROFILE_PARENT_SQL, profileParams, PROFILE_COLS } from '../_lib.js';
@@ -21,14 +23,23 @@ export async function onRequestPost({ request, env }) {
 
     const d = db(env);
     const adopted = [];
+    const skipped = [];
     for (const p of body.profiles.slice(0, ADOPT_CAP)) {
       if (!p || typeof p.id !== 'string' || !p.id || typeof p.name !== 'string' || !p.name) continue;
       const existing = await d
         .prepare('SELECT id, parent_id FROM profiles WHERE id = ?')
         .bind(p.id)
         .first();
-      // Never touch another parent's row.
-      if (existing && existing.parent_id && existing.parent_id !== parent.id) continue;
+      // Never touch another parent's row — but SAY SO, so the client can show
+      // an honest message instead of a silently-closing dialog.
+      if (existing && existing.parent_id && existing.parent_id !== parent.id) {
+        skipped.push({
+          id: p.id,
+          name: String(p.name).slice(0, 40),
+          reason: 'owned_by_another_account',
+        });
+        continue;
+      }
 
       const now = new Date().toISOString();
       const row = { updated_at: now };
@@ -43,7 +54,7 @@ export async function onRequestPost({ request, env }) {
       await d.prepare(UPSERT_PROFILE_PARENT_SQL).bind(...profileParams(row), parent.id).run();
       adopted.push(p.id);
     }
-    return json({ adopted });
+    return json({ adopted, skipped });
   } catch (e) {
     logError(request, e);
     return json({ error: 'internal error' }, 500);

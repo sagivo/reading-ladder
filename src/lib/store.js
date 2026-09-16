@@ -38,6 +38,60 @@ export function saveStore(store) {
   }
 }
 
+/**
+ * Synchronous store mutation: applies `mutator` to a fresh copy, writes it
+ * to localStorage IMMEDIATELY, and returns it. App.jsx's `commit` uses this
+ * instead of a React setState updater — the old updater deferred saveStore
+ * until React flushed, so any synchronous loadStore() in the same tick
+ * (editKid's PUT payload, the claim flow's syncNow, mergeOnLaunch's parent
+ * check) silently read STALE data.
+ */
+export function mutateStore(mutator) {
+  const s = loadStore();
+  mutator(s);
+  saveStore(s);
+  return s;
+}
+
+/**
+ * Apply a POST /api/auth/adopt result to local profiles (pure, testable).
+ * Returns { claimed: [ids], blocked: [{ id, name, reason }] }.
+ * Profiles the server skipped (e.g. owned by another parent) are flagged
+ * with `claimBlocked` so the UI shows an honest message instead of nagging
+ * the import prompt on every launch.
+ */
+export function applyAdoptResult(store, res) {
+  const adopted = new Set((res && res.adopted) || []);
+  const skipped = (res && res.skipped) || [];
+  const claimed = [];
+  for (const id of adopted) {
+    const p = store.profiles[id];
+    if (p) {
+      p.claimed = true;
+      p.serverPending = false;
+      claimed.push(id);
+    }
+  }
+  const blocked = [];
+  for (const sk of skipped) {
+    if (!sk || !sk.id) continue;
+    const p = store.profiles[sk.id];
+    if (p) {
+      p.claimBlocked = sk.reason || 'unavailable';
+      blocked.push({ id: sk.id, name: p.name, reason: sk.reason || 'unavailable' });
+    }
+  }
+  return { claimed, blocked };
+}
+
+/** Clear claimBlocked flags (e.g. the parent retries claiming from the dashboard). */
+export function clearClaimBlocked(store, ids) {
+  for (const id of ids || []) {
+    const p = store.profiles[id];
+    if (p) delete p.claimBlocked;
+  }
+}
+
 export function newProfile(name, avatar) {
   const now = new Date().toISOString();
   const id = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
@@ -154,6 +208,50 @@ export function clearLessonProgress(profileId) {
     const all = JSON.parse(localStorage.getItem(LESSON_KEY) || '{}');
     delete all[profileId];
     localStorage.setItem(LESSON_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}
+
+// ---- Readiness-check progress (resume after reload) ------------------------
+// Same pattern as lesson progress: a reload mid-readiness-check used to drop
+// the child back at the first question. We persist { game, results } per
+// profile; Home offers "Continue check" while it is fresh (< 24h). Cleared
+// when the check completes (placement is set).
+
+const READINESS_KEY = 'reading-ladder-readiness-v1';
+const READINESS_TTL_MS = 24 * 60 * 60 * 1000;
+
+export function saveReadinessProgress(profileId, game, results) {
+  try {
+    const all = JSON.parse(localStorage.getItem(READINESS_KEY) || '{}');
+    all[profileId] = { game, results, savedAt: Date.now() };
+    localStorage.setItem(READINESS_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadReadinessProgress(profileId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(READINESS_KEY) || '{}');
+    const r = all[profileId];
+    if (!r || typeof r.game !== 'number' || !r.results || typeof r.results !== 'object') return null;
+    if (Date.now() - (r.savedAt || 0) > READINESS_TTL_MS) {
+      clearReadinessProgress(profileId);
+      return null;
+    }
+    return r;
+  } catch {
+    return null;
+  }
+}
+
+export function clearReadinessProgress(profileId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(READINESS_KEY) || '{}');
+    delete all[profileId];
+    localStorage.setItem(READINESS_KEY, JSON.stringify(all));
   } catch {
     /* ignore */
   }

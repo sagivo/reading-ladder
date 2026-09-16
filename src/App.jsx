@@ -23,9 +23,9 @@ import SessionEnd from './components/SessionEnd.jsx';
 import ParentDash from './components/ParentDash.jsx';
 import Companion from './components/Companion.jsx';
 import { Screen, Title, Subtitle } from './components/ui.jsx';
-import { loadStore, saveStore, touchProfile, queueEvent, loadDismissedClaimIds, saveDismissedClaimIds } from './lib/store.js';
-import { saveLessonProgress, loadLessonProgress, clearLessonProgress } from './lib/store.js';
-import { mergeOnLaunch, syncNow } from './lib/sync.js';
+import { loadStore, saveStore, touchProfile, queueEvent, loadDismissedClaimIds, saveDismissedClaimIds, mutateStore, clearClaimBlocked } from './lib/store.js';
+import { saveLessonProgress, loadLessonProgress, clearLessonProgress, saveReadinessProgress, loadReadinessProgress, clearReadinessProgress } from './lib/store.js';
+import { mergeOnLaunch, syncNow, onSyncState } from './lib/sync.js';
 import { getMe, logout, listProfiles, isAuthError } from './lib/auth.js';
 import { buildEarlyLesson, buildPreLesson } from './lib/lesson.js';
 import { recordAttempt, newSoundMastery, addMiss, clearMiss, nextTargetIndex, isMastered } from './lib/mastery.js';
@@ -90,6 +90,7 @@ export default function App() {
   const [activeId, setActiveId] = useState(null);
   const [plan, setPlan] = useState(null);
   const [resumeStep, setResumeStep] = useState(0);
+  const [readinessSaved, setReadinessSaved] = useState(null); // { game, results } | null
   const [summary, setSummary] = useState(null);
   const [sessionStart, setSessionStart] = useState(0);
   const [soundOn, setSoundOn] = useState(true);
@@ -99,6 +100,19 @@ export default function App() {
     parentRef.current = p;
     setParent(p);
   }
+
+  // syncNow() mutates localStorage directly (ackEvents + saveStore), so the
+  // React `store` state would otherwise keep showing a stale queue count
+  // forever — the dashboard sat on "N changes waiting to sync" after a
+  // successful drain. Reload the store whenever a sync run settles into a
+  // terminal state (not on 'syncing' — that would re-render mid-run).
+  useEffect(
+    () =>
+      onSyncState((s) => {
+        if (s && s.state && s.state !== 'syncing') setStore({ ...loadStore() });
+      }),
+    []
+  );
 
   /** Session is gone: drop to the parent sign-in screen. */
   function handleSessionExpired() {
@@ -128,7 +142,7 @@ export default function App() {
     const dismissed = new Set(loadDismissedClaimIds());
     const s = loadStore();
     const cands = Object.values(s.profiles).filter(
-      (p) => !p.claimed && !inServer.has(p.id) && !dismissed.has(p.id)
+      (p) => !p.claimed && !p.claimBlocked && !inServer.has(p.id) && !dismissed.has(p.id)
     );
     if (cands.length > 0) {
       setClaimIds(cands.map((p) => p.id));
@@ -237,13 +251,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Synchronous commit: mutateStore writes localStorage IMMEDIATELY and the
+  // same object becomes React state. (The old setState-updater version
+  // deferred saveStore until React flushed, so synchronous loadStore() calls
+  // in the same tick — editKid's PUT payload, the claim flow, mergeOnLaunch —
+  // silently read stale data.)
   function commit(mutator) {
-    setStore((prev) => {
-      const s = structuredClone(prev);
-      mutator(s);
-      saveStore(s);
-      return s;
-    });
+    setStore(mutateStore(mutator));
   }
 
   function updateProfile(id, fn) {
@@ -322,8 +336,10 @@ export default function App() {
     const s = loadStore();
     const unclaimed = Object.values(s.profiles).filter((p) => !p.claimed);
     if (unclaimed.length === 0) return;
-    // Un-dismiss them so the claim screen offers them again.
+    // Un-dismiss them (and clear any "belongs to another account" flag) so the
+    // claim screen offers them again — the other account may have been deleted.
     const ids = new Set(unclaimed.map((p) => p.id));
+    commit((st) => clearClaimBlocked(st, [...ids]));
     saveDismissedClaimIds(loadDismissedClaimIds().filter((id) => !ids.has(id)));
     setClaimIds(unclaimed.map((p) => p.id));
     setScreen('claim');
@@ -333,7 +349,10 @@ export default function App() {
     setActiveId(id);
     if (startLesson) {
       const p = store.profiles[id];
-      if (p && !p.archived && !p.placement) setScreen('readiness');
+      if (p && !p.archived && !p.placement) {
+        // Resume a half-finished readiness check when one is saved.
+        beginReadiness(p, loadReadinessProgress(id));
+      }
       else if (p && !p.archived) beginLesson(p);
     }
   }
@@ -387,6 +406,8 @@ export default function App() {
 
   function readinessDone(placement) {
     if (!activeId) return;
+    clearReadinessProgress(activeId);
+    setReadinessSaved(null);
     updateProfile(activeId, (p) => {
       p.placement = placement;
       p.track = placement.track;
@@ -396,6 +417,20 @@ export default function App() {
     syncNow().catch((e) => {
       if (isAuthError(e)) handleSessionExpired();
     });
+  }
+
+  /** Start (or resume) the readiness check for a not-yet-placed reader. */
+  function beginReadiness(p, saved = null) {
+    setReadinessSaved(saved);
+    setActiveId(p.id);
+    if (saved) log(p.id, 'readiness_resumed', { game: saved.game });
+    else log(p.id, 'readiness_started', {});
+    setScreen('readiness');
+  }
+
+  /** Persist readiness-check position as the child plays (for resume). */
+  function handleReadinessProgress(game, results) {
+    if (activeId) saveReadinessProgress(activeId, game, results);
   }
 
   function setProfileVoice(id, voice) {
@@ -424,9 +459,20 @@ export default function App() {
     if (activeId && plan) saveLessonProgress(activeId, plan, i);
   }
 
+  // Resume offers for Home: a half-finished readiness check ("Continue check")
+  // or a half-finished lesson ("Continue lesson"). Readiness resume only
+  // applies before placement is set.
   function resumeInfoFor(id) {
     if (!id) return null;
-    return loadLessonProgress(id);
+    const s = loadStore();
+    const p = s.profiles[id];
+    if (p && !p.placement) {
+      const r = loadReadinessProgress(id);
+      if (r) return { kind: 'readiness', saved: r };
+    }
+    const l = loadLessonProgress(id);
+    if (l) return { kind: 'lesson', saved: l };
+    return null;
   }
 
   const parentScreens = ['home', 'kids', 'parent', 'claim'];
@@ -478,11 +524,11 @@ export default function App() {
           resumeFor={resumeInfoFor}
           onResume={(id) => {
             const p = store.profiles[id];
-            const saved = loadLessonProgress(id);
-            if (p && saved) {
-              setActiveId(id);
-              beginLesson(p, saved);
-            }
+            const info = resumeInfoFor(id);
+            if (!p || !info) return;
+            setActiveId(id);
+            if (info.kind === 'readiness') beginReadiness(p, info.saved);
+            else beginLesson(p, info.saved);
           }}
         />
       )}
@@ -496,7 +542,14 @@ export default function App() {
         />
       )}
       {screen === 'readiness' && profile && (
-        <Readiness profile={profile} onDone={readinessDone} onHome={goHome} />
+        <Readiness
+          profile={profile}
+          onDone={readinessDone}
+          onHome={goHome}
+          initialGame={readinessSaved ? readinessSaved.game : 0}
+          initialResults={readinessSaved ? readinessSaved.results : {}}
+          onProgress={handleReadinessProgress}
+        />
       )}
       {screen === 'placement' && profile && (
         <Placement
@@ -545,6 +598,10 @@ export default function App() {
           onManageKids={() => setScreen('kids')}
           onClaimUnclaimed={reclaimUnclaimed}
           onSessionExpired={handleSessionExpired}
+          // Re-read the store from localStorage after a sync run settles:
+          // syncNow() mutates localStorage directly, so the React `store`
+          // state would otherwise keep showing a stale queue count forever.
+          refreshSync={() => setStore({ ...loadStore() })}
         />
       )}
     </>

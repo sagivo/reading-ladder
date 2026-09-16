@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { Screen, BigButton, Title, Subtitle } from './ui.jsx';
 import { adopt, isAuthError, friendlyError } from '../lib/auth.js';
 import { toServer } from '../lib/sync.js';
-import { touchProfile, loadDismissedClaimIds, saveDismissedClaimIds } from '../lib/store.js';
+import { touchProfile, loadDismissedClaimIds, saveDismissedClaimIds, applyAdoptResult } from '../lib/store.js';
 
 export default function Claim({ ids, store, commit, onDone, onSessionExpired }) {
   const [busy, setBusy] = useState(false);
@@ -20,17 +20,30 @@ export default function Claim({ ids, store, commit, onDone, onSessionExpired }) 
     setError(null);
     try {
       const res = await adopt(kids.map(toServer));
-      const ok = new Set(res.adopted || []);
+      let outcome = { claimed: [], blocked: [] };
       commit((s) => {
-        for (const id of ok) {
+        outcome = applyAdoptResult(s, res);
+        for (const id of outcome.claimed) {
           const p = s.profiles[id];
-          if (p) {
-            p.claimed = true;
-            p.serverPending = false;
-            touchProfile(p);
-          }
+          if (p) touchProfile(p);
         }
       });
+      if (outcome.blocked.length > 0) {
+        // The server refused these (e.g. they belong to another account).
+        // Say so plainly and KEEP the dialog open — closing silently here
+        // used to leave the import prompt nagging every launch with the
+        // sync queue stuck forever and no explanation.
+        const names = outcome.blocked.map((b) => b.name).join(', ');
+        const rest =
+          outcome.claimed.length > 0
+            ? ' The other readers were added to your account.'
+            : ' Their progress stays on this device.';
+        setError(
+          `${names} ${outcome.blocked.length === 1 ? 'is' : 'are'} already attached to a ` +
+          `different account and can't be moved to yours.${rest}`
+        );
+        return;
+      }
       onDone();
     } catch (e) {
       console.warn('adopt failed', e);

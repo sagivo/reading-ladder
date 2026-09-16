@@ -110,3 +110,27 @@ test('readiness: a finished trial machine ignores taps (the dead end), a fresh o
   const ev = fresh.tap(SEQ_CORRECT_ID);
   assert.equal(ev.kind, 'correct');
 });
+
+// ---- readiness resume wiring (reload mid-check offers "Continue check") ----
+const appSrc = fs.readFileSync(path.join(here, '../src/App.jsx'), 'utf8');
+const homeSrc = fs.readFileSync(path.join(here, '../src/components/Home.jsx'), 'utf8');
+
+test('readiness resume: orchestrator accepts initialGame/initialResults/onProgress', () => {
+  assert.match(readinessSrc, /initialGame\s*=\s*0/);
+  assert.match(readinessSrc, /initialResults\s*=\s*\{/);
+  assert.match(readinessSrc, /onProgress/);
+  assert.match(readinessSrc, /useState\(initialGame\)/);
+});
+
+test('readiness resume: App persists position and offers resume before placement', () => {
+  assert.match(appSrc, /saveReadinessProgress/);
+  assert.match(appSrc, /loadReadinessProgress/);
+  assert.match(appSrc, /clearReadinessProgress/);
+  assert.match(appSrc, /beginReadiness/);
+  assert.match(appSrc, /kind: 'readiness'/);
+});
+
+test('readiness resume: Home labels the resume offer honestly', () => {
+  assert.match(homeSrc, /Continue.*'s check/);
+  assert.match(homeSrc, /resume\.kind === 'readiness'/);
+});

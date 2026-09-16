@@ -194,7 +194,7 @@ export default function Kids({ store, commit, onBack, onStartKid, onSessionExpir
   const [confirmArchiveId, setConfirmArchiveId] = useState(null);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
-  const [offlineNote, setOfflineNote] = useState(false);
+  const [note, setNote] = useState(null); // honest local-only/offline notice
 
   function push() {
     syncNow().catch((e) => {
@@ -205,7 +205,7 @@ export default function Kids({ store, commit, onBack, onStartKid, onSessionExpir
   async function addKid({ name, avatar, birthYear }) {
     setBusy('add');
     setError(null);
-    setOfflineNote(false);
+    setNote(null);
     try {
       const res = await createKid({ name, avatar, birth_year: birthYear });
       const p = fromServer(res.profile);
@@ -231,7 +231,7 @@ export default function Kids({ store, commit, onBack, onStartKid, onSessionExpir
           queueEvent(s, p.id, 'profile_created', { name, avatar });
         });
         setAdding(false);
-        setOfflineNote(true);
+        setNote("📴 Saved on this device — will sync when you're back online.");
       } else {
         console.warn('add kid failed', e);
         setError(friendlyError(e));
@@ -244,7 +244,7 @@ export default function Kids({ store, commit, onBack, onStartKid, onSessionExpir
   async function editKid(id, { name, avatar, birthYear }) {
     setBusy('save');
     setError(null);
-    setOfflineNote(false);
+    setNote(null);
     commit((s) => {
       const p = s.profiles[id];
       if (p) {
@@ -257,7 +257,14 @@ export default function Kids({ store, commit, onBack, onStartKid, onSessionExpir
     });
     try {
       const p = loadStore().profiles[id];
-      if (p) await updateKid(id, toServer(p));
+      // Unclaimed readers have no server row yet — a PUT would 404 with a
+      // misleading "profile not found" while the change is safely stored
+      // locally (the queued event + a later claim carry it to the server).
+      if (p && p.claimed) {
+        await updateKid(id, toServer(p));
+      } else if (p) {
+        setNote(`💾 Saved on this device — will sync once ${p.name} is added to your account.`);
+      }
       setEditingId(null);
       push();
     } catch (e) {
@@ -267,7 +274,7 @@ export default function Kids({ store, commit, onBack, onStartKid, onSessionExpir
       }
       if (e.message === 'network_unreachable') {
         setEditingId(null);
-        setOfflineNote(true);
+        setNote("📴 Saved on this device — will sync when you're back online.");
       } else {
         console.warn('edit kid failed', e);
         setError(friendlyError(e));
@@ -280,7 +287,7 @@ export default function Kids({ store, commit, onBack, onStartKid, onSessionExpir
   async function archiveKid(id) {
     setBusy('archive');
     setError(null);
-    setOfflineNote(false);
+    setNote(null);
     commit((s) => {
       const p = s.profiles[id];
       if (p) {
@@ -290,14 +297,19 @@ export default function Kids({ store, commit, onBack, onStartKid, onSessionExpir
       }
     });
     try {
-      await updateKid(id, { archived: true });
+      // Same unclaimed rule as editKid: no server row exists yet, so the PUT
+      // would 404. The queued profile_archived event propagates the archive
+      // after the reader is claimed (sync applies it explicitly post-adopt).
+      const ap = loadStore().profiles[id];
+      if (ap && ap.claimed) await updateKid(id, { archived: true });
+      else if (ap) setNote(`💾 Saved on this device — will sync once ${ap.name} is added to your account.`);
       push();
     } catch (e) {
       if (isAuthError(e)) {
         onSessionExpired();
         return;
       }
-      if (e.message === 'network_unreachable') setOfflineNote(true);
+      if (e.message === 'network_unreachable') setNote("📴 Saved on this device — will sync when you're back online.");
       else {
         console.warn('archive kid failed', e);
         setError(friendlyError(e));
@@ -320,14 +332,17 @@ export default function Kids({ store, commit, onBack, onStartKid, onSessionExpir
       }
     });
     try {
-      await updateKid(id, { archived: false });
+      // Same unclaimed rule as editKid/archiveKid: no server row exists yet.
+      const rp = loadStore().profiles[id];
+      if (rp && rp.claimed) await updateKid(id, { archived: false });
+      else if (rp) setNote(`💾 Saved on this device — will sync once ${rp.name} is added to your account.`);
       push();
     } catch (e) {
       if (isAuthError(e)) {
         onSessionExpired();
         return;
       }
-      if (e.message === 'network_unreachable') setOfflineNote(true);
+      if (e.message === 'network_unreachable') setNote("📴 Saved on this device — will sync when you're back online.");
       else {
         console.warn('restore kid failed', e);
         setError(friendlyError(e));
@@ -353,12 +368,12 @@ export default function Kids({ store, commit, onBack, onStartKid, onSessionExpir
           {error}
         </div>
       )}
-      {offlineNote && (
+      {note && (
         <div style={{
           background: '#f1f0fa', border: '3px solid #d9d4f5', borderRadius: 16,
           padding: '12px 20px', fontSize: 18, fontWeight: 700, textAlign: 'center', width: '100%',
         }}>
-          📴 Saved on this device — will sync when you're back online.
+          {note}
         </div>
       )}
 

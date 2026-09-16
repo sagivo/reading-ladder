@@ -121,7 +121,7 @@ export default function Home({ profiles, activeId, onSelect, onParent, onManageK
               color="#22a06b"
               onClick={() => { speak(`Welcome back, ${active.name}! Let's keep going.`); onResume(active.id); }}
             >
-              ⏯ Continue {active.name}'s lesson
+              {resume.kind === 'readiness' ? `⏯ Continue ${active.name}'s check` : `⏯ Continue ${active.name}'s lesson`}
             </BigButton>
           ) : (
             <BigButton

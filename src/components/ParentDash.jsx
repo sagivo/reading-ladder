@@ -3,12 +3,12 @@
 // how much screen time, what comes next. Plus sync status.
 // Parent-only: sits behind the app's parent-login gate AND the math gate below.
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Screen, BigButton, Title, Subtitle, ChoiceButton } from './ui.jsx';
 import { narrate as speak, setVoice as previewVoice, getVoice, VOICES } from '../lib/narration.js';
 import { SOUNDS, PREVIEW_WORDS } from '../lib/curriculum.js';
 import { nextTargetIndex, pendingMisses } from '../lib/mastery.js';
-import { getSyncState, syncNow } from '../lib/sync.js';
+import { getSyncState, syncNow, onSyncState } from '../lib/sync.js';
 import { isAuthError, friendlyError } from '../lib/auth.js';
 import { pendingCount } from '../lib/store.js';
 
@@ -65,6 +65,12 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
   const [syncError, setSyncError] = useState(null);
   const [confirmTrack, setConfirmTrack] = useState(false);
   const [trackMsg, setTrackMsg] = useState(null);
+  // Re-render on every sync-state transition (spinner, error, drained
+  // count). Without this the dashboard read getSyncState() once per render
+  // and the "Sync now" button appeared dead: the run settled in
+  // localStorage but nothing re-painted.
+  const [, setSyncTick] = useState(0);
+  useEffect(() => onSyncState(() => setSyncTick((n) => n + 1)), []);
   const sync = { ...getSyncState(), pending: pendingCount(store) };
   const p = profiles.find((x) => x.id === activeId) || profiles[0];
 
@@ -110,10 +116,12 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
   // real server errors (and once hid a D1 500) behind a connectivity story.
   const pendingN = sync.pending || 0;
   const unclaimedN = sync.unclaimedPending || 0;
+  const blockedN = sync.blockedPending || 0;
   const pendingBit = pendingN > 0 ? ` (${pendingN} waiting)` : '';
   const syncLabel =
     sync.state === 'auth' ? '🔒 Signed out — please sign in again' :
     sync.state === 'syncing' || syncing ? '🔄 Syncing…' :
+    sync.state === 'blocked' ? `📦 ${blockedN} change${blockedN === 1 ? '' : 's'} belong${blockedN === 1 ? 's' : ''} to reader${blockedN === 1 ? '' : 's'} attached to a different account — they stay on this device` :
     sync.state === 'unclaimed' ? `📦 ${unclaimedN} change${unclaimedN === 1 ? '' : 's'} waiting — add the reader${unclaimedN === 1 ? '' : 's'} to your account to sync` :
     sync.state === 'server_error' ? `⚠️ Couldn't sync just now — progress is safe on this device${pendingBit}` :
     sync.state === 'offline' ? `📴 Offline — will sync when connected${pendingBit}` :
@@ -121,7 +129,7 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
     sync.lastSyncAt ? '✅ Synced' :
     '⏳ Waiting for first sync';
 
-  const shownError = syncError || (sync.state !== 'auth' && sync.state !== 'unclaimed' ? sync.error : null);
+  const shownError = syncError || (sync.state !== 'auth' && sync.state !== 'unclaimed' && sync.state !== 'blocked' ? sync.error : null);
 
   return (
     <Screen>
@@ -187,6 +195,12 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
             </div>
           </div>
         )}
+        {blockedN > 0 && (
+          <div style={{ fontSize: 15, color: '#5b567d', marginTop: 10 }}>
+            📦 These readers are attached to a different account and can't be moved.
+            Their progress stays on this device.
+          </div>
+        )}
         {sync.deadLetter && sync.deadLetter.length > 0 && (
           <div style={{ fontSize: 16, color: '#a33', marginTop: 6 }}>
             ⚠️ {sync.deadLetter.length} change{sync.deadLetter.length === 1 ? '' : 's'} couldn't be saved
@@ -194,6 +208,21 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
           </div>
         )}
         {(sync.pending > 0 || shownError || (sync.deadLetter && sync.deadLetter.length > 0)) && <div style={{ marginTop: 8 }}><BigButton small onClick={doSync} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now 🔄'}</BigButton></div>}
+        {/* Sync diagnostics: last attempt, last error, per-event failures.
+            When sync looks stuck, this line says exactly why instead of a
+            silent spinner or a frozen count. */}
+        {(sync.lastAttemptAt || sync.lastSyncAt || sync.error) && (
+          <div style={{ fontSize: 13, color: '#8a84a8', marginTop: 8, lineHeight: 1.5 }}>
+            {sync.lastAttemptAt && <div>Last attempt: {new Date(sync.lastAttemptAt).toLocaleString()}</div>}
+            {sync.lastSyncAt && <div>Last successful sync: {new Date(sync.lastSyncAt).toLocaleString()}</div>}
+            {sync.failCounts && Object.keys(sync.failCounts).length > 0 && (
+              <div>
+                Failing now ({Object.keys(sync.failCounts).length}):{' '}
+                {Object.entries(sync.failCounts).slice(0, 3).map(([id, f]) => `${id}: ${f.error} (try ${f.n})`).join(' · ')}
+              </div>
+            )}
+          </div>
+        )}
         <div style={{ fontSize: 15, color: '#5b567d', marginTop: 8 }}>
           Lessons always work offline. Progress is stored on this device first, then synced to the family database when connected.
         </div>
@@ -307,7 +336,8 @@ function Dashboard({ profiles, activeId, onSelectProfile, onOverrideTrack, onSet
 
 export default function ParentDash(props) {
   const [passed, setPassed] = useState(false);
-  const [nonce, setNonce] = useState(0);
   if (!passed) return <Gate onPass={() => setPassed(true)} onCancel={props.onBack} />;
-  return <Dashboard {...props} refreshSync={() => setNonce(nonce + 1)} />;
+  // NOTE: Dashboard subscribes to onSyncState itself for live re-renders;
+  // refreshSync comes from App and reloads the store from localStorage.
+  return <Dashboard {...props} />;
 }

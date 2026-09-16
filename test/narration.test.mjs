@@ -28,6 +28,16 @@ function pyHash(voice, text) {
   return createHash('sha256').update(`${voice}|${text}`, 'utf8').digest('hex').slice(0, 32);
 }
 
+// Tests run without real MP3s: register the test strings in the manifest so
+// playClip() takes the MP3 path, the way production does for covered clips.
+{
+  const entries = [];
+  for (const voice of ['sarah', 'brian'])
+    for (const text of ['Hi.', "Let's try again.", 'Which one starts with mmm? Tap it.', 'One.', 'Two.'])
+      entries.push(`${voice}/${pyHash(voice, text)}`);
+  N.__setAudioManifestForTest(entries);
+}
+
 test('audioUrl matches the Python content-hash scheme (same-origin static assets)', async () => {
   for (const [voice, text] of [['sarah', 'Hi.'], ['brian', "Let's try again."], ['sarah', 'Which one starts with mmm? Tap it.']]) {
     const url = await N.audioUrl(voice, text);
@@ -76,6 +86,12 @@ test('narrateQueue plays parts in order', async () => {
 test('stop() cancels without throwing', async () => {
   N.stop();
   assert.ok(true);
+});
+
+test('manifest miss skips the MP3 attempt (no dead-air fetch for unclipped strings)', async () => {
+  playedUrls.length = 0;
+  await N.narrate('This string has no clip 12345.');
+  assert.equal(playedUrls.length, 0, 'must not attempt an MP3 fetch for a hash outside the manifest');
 });
 
 test('mute switch: narrate() is a no-op while muted (MP3 path)', async () => {

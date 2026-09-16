@@ -18,6 +18,7 @@
 //      onStatus(cb) for the parent audio indicator.
 
 import { speak as webSpeak, stop as webStop, setSoundEnabled as setWebSoundEnabled } from './speech.js';
+import { AUDIO_MANIFEST } from './audioManifest.js';
 
 export const VOICES = {
   sarah: { label: 'Sarah', hint: 'Warm feminine voice' },
@@ -53,6 +54,12 @@ export function setSoundEnabled(v) {
 /** Current mute state (for initializing toggle buttons). */
 export function isSoundEnabled() {
   return narrationEnabled;
+}
+
+/** Test-only hook: replace the clip manifest (unit tests run without real MP3s). */
+export function __setAudioManifestForTest(entries) {
+  AUDIO_MANIFEST.clear();
+  for (const e of entries) AUDIO_MANIFEST.add(e);
 }
 
 // Narration hold: after a celebration, the next question's instruction
@@ -124,7 +131,11 @@ function playMp3(url, gen) {
   });
 }
 
+// null = unknown; false = the endpoint 404'd, so don't burn a POST per clip.
+let safetyNetAvailable = null;
+
 async function safetyNet(text, voice, gen) {
+  if (safetyNetAvailable === false) return false;
   try {
     const res = await fetch('/api/audio', {
       method: 'POST',
@@ -132,6 +143,11 @@ async function safetyNet(text, voice, gen) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voice }),
     });
+    if (res.status === 404) {
+      // No such route in this deployment — remember, stop asking.
+      safetyNetAvailable = false;
+      return false;
+    }
     if (!res.ok || gen !== generation) return false;
     const blob = await res.blob();
     if (!blob || blob.size < 100) return false;
@@ -148,13 +164,23 @@ async function safetyNet(text, voice, gen) {
 async function playClip(text, voice, opts = {}) {
   const gen = generation;
   if (!text) return false;
-  // 1. Pre-generated R2 MP3.
+  // 1. Pre-generated MP3 — but ONLY when the build-time manifest says the
+  // clip exists. ~80% of spoken strings have no clip yet, and without this
+  // check each of them burned ~a second of dead air: the SPA fallback
+  // answers the MP3 URL with index.html (HTTP 200!), the audio element
+  // errors out, then the safety-net POST 404s — all before Web Speech
+  // finally speaks. Manifest miss => skip straight to the fallbacks.
+  let hash = null;
   try {
-    const url = await audioUrl(voice, text);
+    hash = (await sha256hex(`${voice}|${text}`)).slice(0, 32);
+  } catch { /* fall through without a hash */ }
+  if (hash && AUDIO_MANIFEST.has(`${voice}/${hash}`)) {
+    try {
+      if (gen !== generation) return false;
+      if (await playMp3(`${AUDIO_BASE_URL}/audio/${voice}/${hash}.mp3`, gen)) return true;
+    } catch { /* fall through */ }
     if (gen !== generation) return false;
-    if (await playMp3(url, gen)) return true;
-  } catch { /* fall through */ }
-  if (gen !== generation) return false;
+  }
   // 2. Safety net (logged server-side for backfill).
   if (!opts.noSafetyNet) {
     if (await safetyNet(text, voice, gen)) return true;
@@ -220,6 +246,10 @@ export function preload(texts) {
   try {
     for (const text of (texts || []).slice(0, 4)) {
       audioUrl(currentVoice, text).then((url) => {
+        // Don't warm the cache for clips the manifest says don't exist —
+        // that's just a wasted fetch of the SPA fallback page.
+        const m = url.match(/\/audio\/([^/]+)\/([0-9a-f]{32})\.mp3$/);
+        if (m && !AUDIO_MANIFEST.has(`${m[1]}/${m[2]}`)) return;
         const a = new Audio();
         a.preload = 'auto';
         a.src = url;

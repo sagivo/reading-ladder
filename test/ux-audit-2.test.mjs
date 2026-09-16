@@ -65,10 +65,23 @@ test('add-reader passes through exactly one grown-up gate (no double math quiz)'
   assert.match(app, /screen === 'kids' && !kidsGate/);
 });
 
-test('story early-tap shows a visible hint, not just spoken guidance', () => {
-  const lesson = src('components/LessonEarly.jsx');
-  assert.match(lesson, /Tap each line to hear the story first!/);
-  assert.match(lesson, /aria-live="polite"/);
+test('v2 story: words are tappable buttons with spoken playback, no readable directions', () => {
+  const story = src('components/ReadStory.jsx');
+  // Every word is a real button the child can tap to hear it.
+  assert.match(story, /hearWord/);
+  assert.match(story, /<button/);
+  // Graphemes are color-coded visually (digraphs grouped, not letter salad).
+  assert.match(story, /DIGRAPH_COLORS/);
+  // The screen opens with spoken guidance, not written instructions.
+  assert.match(story, /speak\("Let's read!"\)/);
+  assert.doesNotMatch(story, /<Title|<Subtitle/);
+});
+
+test('v2 finale: GoFindSomeone is one big star button, no reading required', () => {
+  const go = src('components/GoFindSomeone.jsx');
+  assert.match(go, /⭐/);
+  assert.match(go, /narrateQueue\(\['You read a story!', 'Go find someone and read it to them!'\]\)/);
+  assert.doesNotMatch(go, /<Title|<Subtitle/);
 });
 
 test('locked accessory tap shows a visible explanation, not just spoken', () => {

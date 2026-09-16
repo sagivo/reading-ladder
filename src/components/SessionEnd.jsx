@@ -1,49 +1,56 @@
-// Session end: hard but friendly. Celebrate precisely, issue ONE offline
-// mission, and offer only "Done". No "one more lesson" — the loop closes.
+// Session end v2 — the fatigue ending.
+// "The animals are getting sleepy…" — screens off at mental fatigue,
+// celebration of stars earned, "see you tomorrow". No readable directions
+// for the child; everything is spoken.
 
 import React, { useEffect } from 'react';
 import { Screen, BigButton, Title, Subtitle } from './ui.jsx';
 import { narrateQueue, stop } from '../lib/narration.js';
-import { SOUNDS, ACCESSORIES } from '../lib/curriculum.js';
-import { companionEmoji, companionBg } from './Home.jsx';
+import { ACCESSORIES } from '../lib/curriculum.js';
+
+const SLEEPY = ['🦉', '🐻', '🦊', '🐰', '🐼'];
 
 export default function SessionEnd({ profile, summary, unlockedAccessory, onDone, onCompanion }) {
-  const sound = SOUNDS.find((s) => s.g === summary.newSound);
+  const levels = summary.levels || [];
+  const stars = levels.length;
+  const done = !!summary.completedAll;
 
   useEffect(() => {
     stop();
-    // Fixed parts via narrateQueue, not one composed string: the composed
-    // string could never match a pre-generated clip hash, so the whole
-    // summary fell back to Web Speech. Only the mission text is dynamic.
-    const parts = ['All done!'];
-    if (summary.newSound) parts.push(`You learned the sound ${sound ? sound.say : summary.newSound}.`);
-    if (summary.wordsRead) parts.push(`You read ${summary.wordsRead} ${summary.wordsRead === 1 ? 'word' : 'words'}.`);
-    if (summary.soundMastered) parts.push('You mastered a sound!');
-    // The offline mission is the loop-closer: it must be SPOKEN, not just
-    // shown — a pre-reader can never read it off the screen.
-    if (summary.mission) parts.push(`Time for a real-world mission. ${summary.mission} Tell a grown-up when you've done it.`);
-    parts.push('Tap Done to finish.');
+    const parts = done
+      ? ['You learned all the sounds!']
+      : ['All done! The animals are getting sleepy.'];
+    if (stars > 0) parts.push(`You earned ${stars} ${stars === 1 ? 'star' : 'stars'}!`);
+    parts.push('See you tomorrow!');
     narrateQueue(parts);
-  }, []);
+    return () => stop();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const acc = ACCESSORIES.find((a) => a.id === unlockedAccessory);
 
   return (
-    <Screen bg="linear-gradient(160deg, #e8fbef 0%, #eef6ff 100%)">
-      <div style={{
-        width: 130, height: 130, borderRadius: '50%', fontSize: 72,
-        background: companionBg(profile.companion), display: 'flex',
-        alignItems: 'center', justifyContent: 'center',
-      }}>
-        {companionEmoji(profile.companion)}
+    <Screen bg={done
+      ? 'linear-gradient(160deg, #7c3aed 0%, #db2777 100%)'
+      : 'linear-gradient(160deg, #1f2a5a 0%, #3a2a6e 100%)'}>
+      <div style={{ display: 'flex', gap: 12, fontSize: 56, marginTop: 24 }}>
+        {(done ? ['🎉', '⭐', '🎊', '🌟', '🥳'] : SLEEPY).map((e, i) => (
+          <span key={i} style={{ animation: `snooze 2.4s ease-in-out ${i * 0.3}s infinite`, display: 'inline-block' }}>
+            {e}
+          </span>
+        ))}
       </div>
-      <Title>All done! 🎉</Title>
-      <Subtitle>
-        {summary.newSound && <>You learned{' '}<b>/{sound ? sound.say : summary.newSound}/</b>{' '}({summary.newSound}).<br /></>}
-        {summary.wordsRead > 0 && <>You read <b>{summary.wordsRead}</b> {summary.wordsRead === 1 ? 'word' : 'words'}.<br /></>}
-        {summary.soundMastered && <>🌟 You <b>mastered</b> a sound!<br /></>}
-        {summary.minutes != null && <>Lesson time: {summary.minutes} min.<br /></>}
-      </Subtitle>
+      <Title><span style={{ color: '#fff' }}>{done ? 'You learned all the sounds! 🎉' : 'All done! 🌙'}</span></Title>
+      {!done && (
+        <Subtitle><span style={{ color: '#cfd2ff' }}>The animals are getting sleepy…</span></Subtitle>
+      )}
+
+      {stars > 0 && (
+        <div style={{ display: 'flex', gap: 10, fontSize: 44, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {levels.map((lv, i) => (
+            <span key={i} title={`Level ${lv}`} style={{ animation: `starpop 0.5s ease-out ${i * 0.15}s both`, display: 'inline-block' }}>⭐</span>
+          ))}
+        </div>
+      )}
 
       {acc && acc.emoji && (
         <div style={{
@@ -55,18 +62,13 @@ export default function SessionEnd({ profile, summary, unlockedAccessory, onDone
         </div>
       )}
 
-      <div style={{
-        background: '#fff', borderRadius: 24, padding: 24, width: '100%',
-        border: '4px solid #7c5cd6', textAlign: 'center',
-      }}>
-        <div style={{ fontSize: 22, fontWeight: 800, color: '#7c5cd6', marginBottom: 8 }}>🌍 OFFLINE MISSION</div>
-        <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.4 }}>{summary.mission}</div>
-        <div style={{ fontSize: 20, color: '#5b567d', marginTop: 8 }}>Tell a grown-up when you've done it.</div>
-      </div>
-
       <BigButton color="#22a06b" onClick={() => { stop(); onDone(); }}>
         Done — put the tablet away 📴
       </BigButton>
+      <style>{`
+        @keyframes snooze { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(10px) rotate(-6deg); } }
+        @keyframes starpop { 0% { transform: scale(0); } 70% { transform: scale(1.3); } 100% { transform: scale(1); } }
+      `}</style>
     </Screen>
   );
 }

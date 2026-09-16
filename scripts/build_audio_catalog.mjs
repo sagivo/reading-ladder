@@ -20,12 +20,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { SOUNDS, WORD_BANK, PREVIEW_WORDS } from '../src/lib/curriculum.js';
-import { generateStory, mulberry32 } from '../src/lib/story.js';
-import { FIRST_SOUND_ITEMS } from '../src/lib/lesson.js';
 import {
-  SEQ_ITEMS, BLEND_ITEMS, INVENTORY_SOUNDS,
-  sequenceInstruction, blendWordChoices, inventoryChoices,
-} from '../src/lib/readiness.js';
+  ORDER as ORDER2, META as META2, MAX_LEVEL as MAX_LEVEL2,
+  blendWordsForLevel, microStory, mulberry32 as mulberry32_2,
+} from '../src/lib/curriculum2.js';
 // Safety net against catalog drift: every plain string literal passed to the
 // narration API in src/ is picked up automatically, so a reworded speak()
 // can never again silently lose its pre-generated clip (the way the old
@@ -67,81 +65,9 @@ for (const s of SOUNDS) {
   add(`the letter ${s.g}`, 'letter-name'); // QuizStep model branch
 }
 
-// ---------- 2. First-sound game words (spoken as model answers) ----------
-for (const items of Object.values(FIRST_SOUND_ITEMS)) {
-  for (const [word] of items) add(word, 'first-sound-word');
-}
-
 // ---------- 3. Decodable word bank (warmup / build / blend speak the word) ----------
 for (const e of WORD_BANK) add(e.w, 'word-bank');
 for (const w of PREVIEW_WORDS) add(w, 'preview-word');
-
-// ---------- 4. Readiness games ----------
-for (const item of SEQ_ITEMS) {
-  add(`Listen. ${item.words[0]}. ${item.words[1]}. Tap what you heard, in order.`, 'readiness-seq');
-  add(`${item.words[0]} ${item.words[1]}`, 'readiness-seq-choice');
-  add(`${item.words[1]} ${item.words[0]}`, 'readiness-seq-choice');
-}
-add('Tap one circle for each sound you hear. Then tap the green button.', 'readiness-blend');
-for (const item of BLEND_ITEMS) {
-  for (const c of blendWordChoices(item)) add(c.speak, 'readiness-blend-choice');
-}
-for (let taps = 0; taps <= 5; taps++) {
-  add(`You pushed ${taps}. What word do the sounds make?`, 'readiness-blend-quiz');
-}
-for (const g of INVENTORY_SOUNDS) {
-  const s = SOUNDS.find((x) => x.g === g);
-  add(`Which letter says ${s.say}, like ${s.keyword}? Tap it. Or tap "not sure".`, 'readiness-inventory');
-  for (const c of inventoryChoices(g, ['x', 'y'])) {
-    if (c.speak) add(c.speak, 'readiness-inventory-choice');
-  }
-}
-
-// ---------- 5. Pre-reader lesson ----------
-add('Are these two sounds the same or different? Listen.', 'pre-same');
-add('Yes! Same sound.', 'pre-same');
-add('Yes! Different sounds!', 'pre-same');
-add("Let's listen again.", 'pre-same');
-add('Same!', 'pre-same');
-add('Different!', 'pre-same');
-for (const s of SOUNDS) {
-  add(`Which one starts with /${s.say}/, like ${s.keyword}? Tap it.`, 'pre-first');
-  add(`Which letter says ${s.say}? Tap it.`, 'pre-pair');
-  add(`Tap the letter that says /${s.say}/.`, 'pre-pair');
-}
-add('Last game! Listen. dog. fish. Tap what you heard.', 'pre-order');
-add('Last game! Listen. cat. sun. Tap what you heard.', 'pre-order');
-add('Listen: dog … fish. Tap what you heard, in order.', 'pre-order');
-add('Listen: cat … sun. Tap what you heard, in order.', 'pre-order');
-for (const w of ['dog fish', 'fish dog', 'cat sun', 'sun cat']) add(w, 'pre-order-choice');
-
-// ---------- 6. Early-reader lesson ----------
-add("Let's warm up. Tap the word you hear.", 'early-warmup');
-add('Tap the word you hear.', 'early-warmup'); // QuizStep instruction, re-spoken on retry
-for (const s of SOUNDS) add(`Which letter says /${s.say}/?`, 'early-review-retry'); // QuizStep instruction, re-spoken on retry
-for (const s of SOUNDS) {
-  add(`Today's new sound. This letter says ${s.say}, like ${s.keyword}. Say it with me: ${s.say}. When you can say it, tap the green button.`, 'early-new-sound');
-  add(`Which one starts with ${s.say}? Tap it.`, 'early-first-sound');
-  add(`Not yet. Find /${s.say}/.`, 'early-build');
-  add(`Watch: tap ${s.g}. Now you do it.`, 'early-build');
-  add(`You learned the sound ${s.say}.`, 'end-screen');
-}
-// Build step: the word is dynamic per lesson, but the bank is finite.
-for (const e of WORD_BANK) add(`Build the word ${e.w}. Tap the letters in order.`, 'early-build-word');
-add('Slide the sounds together. Then say the word fast.', 'early-blend');
-add('Now say it fast!', 'early-blend');
-add('Now read a real story. Tap each line to hear it, then read it yourself.', 'early-story');
-add('Tap the word you just read.', 'early-blend-quiz');
-for (let n = 1; n <= 30; n++) {
-  add(`You read ${n} ${n === 1 ? 'word' : 'words'}.`, 'end-screen');
-}
-add('All done for today! Come back tomorrow for a new lesson.', 'home');
-add('Welcome back! Let\'s keep going.', 'home');
-add('You are ready to be an early reader! You will learn letter sounds and read real words.', 'placement');
-add('You are a listening reader! You will play sound games and learn letter sounds by ear.', 'placement');
-// Session-end offline mission: filled per lesson ({say}/{g}/{word}/{keyword})
-// — unbounded combinations, Web Speech fallback. Everything else is fixed.
-addDynamic('{mission template × sound × word} — offline mission, filled per lesson', 'unbounded combinations');
 
 // ---------- 7. QuizStep feedback language ----------
 add('Tap the glowing one.', 'quiz-feedback');
@@ -168,18 +94,43 @@ add('Try again, grown-up.', 'parent-gate');
 add('Try again.', 'parent-gate');
 add("Let's go!", 'placement');
 
-// ---------- 10. Seeded story pool (stage × seed — the full finite set) ----------
-// lesson.js: seed = 1 + (sessions.length % 25), stage = sound index 0..29.
-let storyCount = 0;
-for (let stage = 0; stage < SOUNDS.length; stage++) {
-  for (let seed = 1; seed <= 25; seed++) {
-    try {
-      const story = generateStory(stage, mulberry32(seed));
-      for (const s of story.sentences) add(s.text, 'story');
-      if (story.question) add(`${story.question.prompt} Tap the answer.`, 'story-quiz');
-      for (const c of story.question?.choices || []) add(c, 'story-quiz-choice');
-      storyCount++;
-    } catch { /* infeasible combo — runtime throws too */ }
+// ---------- 11. v2 lesson flow (deterministic per level — full finite set) ----------
+// LevelLesson seeds blend words and stories by level, so every word the app
+// can ever speak is enumerable here. Per-sound reveal/direction strings are
+// enumerated for all 30 sounds (DiscoverBarn, RecognizeSheep, shell replay).
+for (const s of ['Tap the barn!', "Who's inside?", 'Keep your voice ON!',
+  'Now you! Hold the button and say the sounds.',
+  'Hold the button and say the sounds. Keep your voice ON!',
+  'Try again. Keep your voice ON!',
+  "Keep your voice ON! Don't stop!",
+  'Tap the sounds to hear them!',
+  'Now you! Tap the sounds, say the word, then tap the star!',
+  'You learned all the sounds!',
+  "Let's read!", 'You did it!',
+  'You read a story!', 'Go find someone and read it to them!',
+  'All done! The animals are getting sleepy.', 'See you tomorrow!',
+  'Tap dogfish!', 'Tap fishdog!',
+  'Listen: dog… fish! Try again!', 'Listen: fish… dog! Try again!',
+  'This one is dogfish.', 'This one is fishdog.', 'Yes!',
+  'Tap the glowing leaf!',
+]) add(s, 'v2-fixed');
+for (let n = 1; n <= 15; n++) add(`You earned ${n} ${n === 1 ? 'star' : 'stars'}!`, 'v2-stars');
+for (const g of ORDER2) {
+  const { say, keyword } = META2[g];
+  add(`It's ${say}!`, 'v2-reveal');
+  add(`${say}, like ${keyword}.`, 'v2-reveal');
+  add(`Say it with me: ${say}!`, 'v2-reveal');
+  add(`Tap the sheep with ${say}!`, 'v2-recognize');
+}
+for (let L = 1; L <= MAX_LEVEL2; L++) {
+  for (const w of blendWordsForLevel(L, 3, mulberry32_2(L))) {
+    add(`${w}! You said it!`, 'v2-blend');
+  }
+  for (const s of microStory(L, L)) {
+    add(s, 'v2-story');
+    for (const w of s.split(/\s+/)) {
+      add(w.replace(/[.,!?]$/, '').toLowerCase(), 'v2-story-word');
+    }
   }
 }
 
@@ -217,7 +168,6 @@ console.log(`fixed strings: ${fixed.size} | dynamic (name-bearing): ${dynamic.si
 console.log(`staged clips: kristy=${staged.kristy.size}`);
 console.log(`covered: ${rows.length - missing.length}`);
 console.log(`missing: ${missing.length}`);
-console.log(`seeded stories generated: ${storyCount}`);
 console.log('\n--- missing by category ---');
 for (const [c, s] of Object.entries(byCat).sort((a, b) => b[1].n - a[1].n)) {
   console.log(`${c}: ${s.n} missing, e.g. ${JSON.stringify(s.sample)}`);

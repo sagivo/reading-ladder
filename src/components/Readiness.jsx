@@ -1,22 +1,14 @@
-// Readiness check: a 4-minute audio-led game, not a test.
-// Decides track by demonstrated skill, not age.
-// Game 1: order awareness — hear two words, pick the matching emoji sequence.
-// Game 2: oral blending — push one token per sound, then pick the word.
-// Game 3: letter-sound mini-inventory.
+// Readiness gate v2 — the dogfish/fishdog left-to-right check.
+// The child must understand that ORDER matters (🐶🐟 "dogfish" vs 🐟🐶
+// "fishdog") before the main track. Fail -> Basics track (sounds only,
+// never blending). "We don't push kids, we stop making them wait."
+//
+// No readable instructions for the child: spoken directions + demo only.
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Screen, BigButton, Title, Subtitle, TopBar, ProgressDots, QuizStep, ChoiceButton, randomPraise } from './ui.jsx';
-import { narrate as speak, speakSoundsSeparately, stop } from '../lib/narration.js';
-import { SOUNDS } from '../lib/curriculum.js';
-import { parseGraphemes } from '../lib/decodability.js';
-import {
-  SEQ_ITEMS, BLEND_ITEMS, INVENTORY_SOUNDS, SEQ_CORRECT_ID,
-  sequenceChoices, sequenceInstruction, blendWordChoices, inventoryChoices,
-} from '../lib/readiness.js';
-
-function soundOf(g) {
-  return SOUNDS.find((s) => s.g === g);
-}
+import { Screen, TopBar, ProgressDots } from './ui.jsx';
+import { narrate as speak, stop } from '../lib/narration.js';
+import { READINESS_TRIALS as TRIALS, trackForScore } from '../lib/readiness2.js';
 
 function shuffle(arr) {
   const a = arr.slice();
@@ -27,214 +19,88 @@ function shuffle(arr) {
   return a;
 }
 
-// ---------- Game 1: sequence match ----------
-function SequenceGame({ onDone }) {
+export default function Readiness({ onDone, onHome }) {
   const [trial, setTrial] = useState(0);
   const [score, setScore] = useState(0);
-  const item = SEQ_ITEMS[trial];
-  const instruction = sequenceInstruction(item);
+  const [retrying, setRetrying] = useState(false);
+  const [wiggle, setWiggle] = useState(null);
+  const [demo, setDemo] = useState(true); // pulsing demo until first tap
+
+  const t = TRIALS[trial];
+  const cards = useMemo(() => shuffle(TRIALS), [trial]);
 
   useEffect(() => {
-    speak(`Listen. ${item.words[0]}. ${item.words[1]}. Tap what you heard, in order.`);
-  }, [trial]);
+    setDemo(true);
+    setRetrying(false);
+    speak(`Tap ${t.id}!`);
+    return () => stop();
+  }, [trial]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // One shuffle per trial: QuizStep caches it on mount, and the key below
-  // remounts per trial so a finished trial can never swallow taps.
-  const choices = useMemo(() => shuffle(sequenceChoices(item)), [trial]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }}>
-      <ProgressDots total={3} done={0} />
-      <Title>Game 1 of 3 · Listening ears 👂</Title>
-      <QuizStep
-        key={trial}
-        instruction={instruction}
-        speakInstruction={false}
-        choices={choices}
-        correctId={SEQ_CORRECT_ID}
-        onResult={({ correct }) => {
-          const s = score + (correct ? 1 : 0);
-          setScore(s);
-          // Immediate: celebration travels with the transition (praise.js).
-          if (trial + 1 < 2) setTrial(trial + 1);
-          else onDone(s);
-        }}
-      />
-    </div>
-  );
-}
-
-// ---------- Game 2: push a token per sound, then blend ----------
-function BlendGame({ onDone }) {
-  const [trial, setTrial] = useState(0);
-  const [score, setScore] = useState(0);
-  const [taps, setTaps] = useState(0);
-  const [counted, setCounted] = useState(false);
-  const item = BLEND_ITEMS[trial];
-  const tokens = [0, 1, 2, 3, 4];
-
-  useEffect(() => {
-    // Word-pick phase: QuizStep speaks its own instruction — never cut it.
-    // (Child effects run before parent effects, so an unconditional stop()
-    // here would silence the question that just started.)
-    if (counted) return;
-    stop();
-    // Chunked for a 3-year-old: one short direction, then the sounds, then
-    // the next step — never a 12-word breath. Chained on the direction's
-    // completion (not a fixed timer) so the sounds can never cut it off on
-    // a slow first load; the cleanup flag drops the chain on trial change.
-    // The sounds don't overwrite the replay slot: "Hear it again" must
-    // always re-speak the full direction, not just the sounds.
-    let cancelled = false;
-    Promise.resolve(
-      speak('Tap one circle for each sound you hear. Then tap the green button.')
-    ).then(() => {
-      if (!cancelled) speakSoundsSeparately(item.sounds.map(soundOf), { noRecord: true });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [trial, counted]);
-
-  const instruction = 'Tap one circle for each sound, then pick the word.';
-
-  function finishTrial(wordCorrect) {
-    const ok = taps === item.sounds.length && wordCorrect;
-    const s = score + (ok ? 1 : 0);
+  const advance = (correct) => {
+    const s = score + (correct ? 1 : 0);
     setScore(s);
-    setTaps(0);
-    setCounted(false);
-    // Immediate: celebration travels with the transition (praise.js).
-    if (trial + 1 < 2) setTrial(trial + 1);
-    else onDone(s);
-  }
-
-  const wordChoices = useMemo(() => shuffle(blendWordChoices(item)), [trial]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }}>
-      <ProgressDots total={3} done={1} />
-      <Title>Game 2 of 3 · Sound tokens 🔵</Title>
-      {!counted ? (
-        <>
-          <Subtitle>{instruction}</Subtitle>
-          <div style={{ display: 'flex', gap: 14 }}>
-            {tokens.map((i) => (
-              <button
-                key={i}
-                onClick={() => setTaps(Math.min(taps + 1, 5))}
-                aria-label={`token ${i + 1}`}
-                style={{
-                  width: 64, height: 64, borderRadius: '50%', cursor: 'pointer',
-                  background: i < taps ? '#7c5cd6' : '#fff',
-                  border: '5px solid #7c5cd6',
-                }}
-              />
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 14 }}>
-            <BigButton small color="#6f66a8" onClick={() => setTaps(0)}>↺ Start over</BigButton>
-            <BigButton small onClick={() => setCounted(true)}>I pushed {taps} ✓</BigButton>
-          </div>
-          <button
-            onClick={() => speakSoundsSeparately(item.sounds.map(soundOf), { noRecord: true })}
-            style={{ background: 'none', border: 'none', fontSize: 20, color: '#6f66a8', textDecoration: 'underline', cursor: 'pointer', minHeight: 48, padding: '8px 16px' }}
-          >🔁 Play the sounds again</button>
-        </>
-      ) : (
-        <QuizStep
-          key={trial}
-          instruction="What word do the sounds make?"
-          choices={wordChoices}
-          correctId={item.word}
-          onResult={({ correct }) => finishTrial(correct)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ---------- Game 3: letter-sound inventory ----------
-function InventoryGame({ onDone }) {
-  const [trial, setTrial] = useState(0);
-  const [score, setScore] = useState(0);
-  const g = INVENTORY_SOUNDS[trial];
-  const s = soundOf(g);
-  const instruction = `Which letter says /${s.say}/, like ${s.keyword}?`;
-
-  useEffect(() => {
-    speak(`Which letter says ${s.say}, like ${s.keyword}? Tap it. Or tap "not sure".`);
-  }, [trial]);
-
-  const distractGs = useMemo(
-    () => shuffle(SOUNDS.filter((x) => x.g !== g && x.g.length === 1).map((x) => x.g)).slice(0, 2),
-    [trial]
-  );
-  // Remount per trial (key) so a finished trial never swallows taps, and so
-  // the "🎉 You figured it out!" praise never persists into the next question.
-  const choices = useMemo(() => shuffle(inventoryChoices(g, distractGs)), [trial, g]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: '100%' }}>
-      <ProgressDots total={3} done={2} />
-      <Title>Game 3 of 3 · Letter sounds 🔤</Title>
-      <div style={{ fontSize: 72 }}>{s.emoji}</div>
-      <QuizStep
-        key={trial}
-        instruction={instruction}
-        speakInstruction={false}
-        choices={choices}
-        correctId={g}
-        onResult={({ correct, modeled }) => {
-          // "not sure" or modeled counts as not-known, without penalty language
-          const s2 = score + (correct && !modeled ? 1 : 0);
-          setScore(s2);
-          // Immediate: celebration travels with the transition (praise.js).
-          if (trial + 1 < INVENTORY_SOUNDS.length) setTrial(trial + 1);
-          else onDone(s2);
-        }}
-      />
-    </div>
-  );
-}
-
-// ---------- Orchestrator ----------
-export default function Readiness({ profile, onDone, onHome, initialGame = 0, initialResults = {}, onProgress }) {
-  const [game, setGame] = useState(initialGame);
-  const [results, setResults] = useState(initialResults);
-
-  // NOTE: no spoken greeting here on purpose. narrate() cancels whatever is
-  // playing, and a parent greeting would cut off the first game's question
-  // (child effects run before parent effects) — the child would only ever
-  // hear the greeting and never learn the task. The game's own instruction
-  // is the opener.
-
-  function next(r) {
-    const res = { ...results, ...r };
-    setResults(res);
-    if (game < 2) {
-      const ng = game + 1;
-      setGame(ng);
-      // Persist position so a reload offers "Continue check" (mirrors lesson resume).
-      if (onProgress) onProgress(ng, res);
+    if (trial + 1 < TRIALS.length) {
+      setTrial(trial + 1);
     } else {
-      // Placement rule: order awareness + oral blending + letter inventory.
-      const track = res.seq >= 1 && res.blend >= 1 && res.letters >= 3 ? 'early' : 'pre';
-      onDone({
-        done: true,
-        at: new Date().toISOString(),
-        seq: res.seq, blend: res.blend, letters: res.letters,
-        track,
-      });
+      onDone({ done: true, at: new Date().toISOString(), track: trackForScore(s), score: s });
     }
-  }
+  };
+
+  const tap = (id) => {
+    setDemo(false);
+    if (id === t.id) {
+      speak('Yes!').then(() => advance(!retrying));
+    } else {
+      setWiggle(id);
+      setTimeout(() => setWiggle(null), 500);
+      if (!retrying) {
+        setRetrying(true);
+        speak(`Listen: ${t.parts[0]}… ${t.parts[1]}! Try again!`);
+      } else {
+        // Second miss: model once more, then move on without pressure.
+        speak(`This one is ${t.id}.`).then(() => advance(false));
+      }
+    }
+  };
 
   return (
     <Screen>
-      <TopBar onHome={onHome} replayText="Listen carefully, then tap your answer." />
-      {game === 0 && <SequenceGame onDone={(seq) => next({ seq })} />}
-      {game === 1 && <BlendGame onDone={(blend) => next({ blend })} />}
-      {game === 2 && <InventoryGame onDone={(letters) => next({ letters })} />}
+      <TopBar onHome={onHome} replayText={`Tap ${t.id}!`} />
+      <ProgressDots total={TRIALS.length} done={trial} />
+      {/* Demo: a ghost hand bounces between the cards — it shows THAT to tap,
+          never WHICH card is right (pulsing the correct card would give away
+          the answer and make the gate meaningless). */}
+      {demo ? (
+        <div
+          aria-hidden="true"
+          style={{ fontSize: 64, textAlign: 'center', marginTop: 8, pointerEvents: 'none', animation: 'ghostTap 1.1s ease-in-out infinite' }}
+        >
+          👆
+        </div>
+      ) : (
+        <div style={{ height: 72, marginTop: 8 }} />
+      )}
+      <div style={{ display: 'flex', gap: '6vw', justifyContent: 'center', marginTop: '1vh' }}>
+        {cards.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => tap(c.id)}
+            aria-label={c.id}
+            style={{
+              width: 'min(40vw, 28vh)', aspectRatio: '1', borderRadius: '18%',
+              fontSize: 'min(13vh, 15vw)',
+              background: '#ffffff', border: '1vmin solid #d9d2f5', cursor: 'pointer',
+              animation: wiggle === c.id ? 'wiggle 0.5s ease-in-out' : 'none',
+            }}
+          >
+            {c.emoji}
+          </button>
+        ))}
+      </div>
+      <style>{`
+        @keyframes ghostTap { 0%,100% { transform: translateY(-6px); } 50% { transform: translateY(10px); } }
+        @keyframes wiggle { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+      `}</style>
     </Screen>
   );
 }

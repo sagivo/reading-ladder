@@ -1,7 +1,7 @@
 // Companion picker: finite cosmetic customization (the only reward).
 // Accessories unlock one per completed session — no grinding, no randomness.
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Screen, BigButton, Title, Subtitle } from './ui.jsx';
 import { narrate as speak, stop } from '../lib/narration.js';
 import { COMPANIONS, COMPANION_COLORS, ACCESSORIES } from '../lib/curriculum.js';
@@ -9,6 +9,9 @@ import { companionBg } from './Home.jsx';
 
 export default function Companion({ profile, onChange, onBack }) {
   const c = profile.companion;
+  // Visible echo of the spoken locked-accessory explanation: spoken-only
+  // feedback is silent in a muted room, so the child also SEES it.
+  const [msg, setMsg] = useState(null);
 
   useEffect(() => {
     stop();
@@ -73,8 +76,11 @@ export default function Companion({ profile, onChange, onBack }) {
               // to earn it instead of silently swallowing the tap.
               aria-disabled={!unlocked}
               onClick={() => {
-                if (unlocked) set({ accessory: a.id });
-                else speak('Finish a lesson to earn a new accessory!');
+                if (unlocked) { set({ accessory: a.id }); setMsg(null); }
+                else {
+                  setMsg('🎁 Finish a lesson to earn a new accessory!');
+                  speak('Finish a lesson to earn a new accessory!');
+                }
               }}
               title={a.name}
               style={{
@@ -87,6 +93,11 @@ export default function Companion({ profile, onChange, onBack }) {
           );
         })}
       </div>
+
+      <div aria-live="polite" style={{
+        minHeight: 34, fontSize: 22, fontWeight: 700, color: '#5b567d',
+        textAlign: 'center', visibility: msg ? 'visible' : 'hidden',
+      }}>{msg || '·'}</div>
 
       <BigButton small onClick={onBack}>Done ✓</BigButton>
     </Screen>

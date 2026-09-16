@@ -298,6 +298,9 @@ function BuildStep({ word, onDone, L }) {
 function StoryStep({ story, onDone, L }) {
   const [heard, setHeard] = useState([]);
   const [quizzing, setQuizzing] = useState(false);
+  // Visible hint for the early tap: the spoken guidance alone is silent in
+  // a muted room, so the child also SEES what to do.
+  const [hint, setHint] = useState(null);
 
   useEffect(() => {
     stop();
@@ -306,7 +309,11 @@ function StoryStep({ story, onDone, L }) {
 
   async function hear(i, text) {
     await speak(text, { rate: 0.9 });
-    if (!heard.includes(i)) setHeard([...heard, i]);
+    if (!heard.includes(i)) {
+      const next = [...heard, i];
+      setHeard(next);
+      if (next.length >= story.sentences.length) setHint(null);
+    }
   }
 
   if (!quizzing) {
@@ -337,6 +344,7 @@ function StoryStep({ story, onDone, L }) {
             child. Tapping early explains what to do instead. */}
         <BigButton small color="#22a06b" onClick={() => {
           if (heard.length < story.sentences.length) {
+            setHint('👆 Tap each line to hear the story first!');
             speak('Tap each line to hear the story first. Then tap: I read it.');
             return;
           }
@@ -344,6 +352,10 @@ function StoryStep({ story, onDone, L }) {
         }}>
           I read it ✓
         </BigButton>
+        <div aria-live="polite" style={{
+          minHeight: 34, fontSize: 22, fontWeight: 700, color: '#5b567d',
+          textAlign: 'center', visibility: hint ? 'visible' : 'hidden',
+        }}>{hint || '·'}</div>
       </div>
     );
   }

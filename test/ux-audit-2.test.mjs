@@ -50,3 +50,30 @@ test('praise overlay is bottom-anchored, away from the top replay button', () =>
   assert.match(overlay, /bottom: 32/);
   assert.doesNotMatch(overlay, /top: 24/);
 });
+
+test('add-reader passes through exactly one grown-up gate (no double math quiz)', () => {
+  const home = src('components/Home.jsx');
+  const app = src('App.jsx');
+  // Home's button routes straight to reader management...
+  assert.doesNotMatch(home, /ParentGate/);
+  assert.match(home, /onClick=\{onManageKids\}/);
+  // ...and App guards the kids screen with a single gate.
+  const gates = app.match(/<ParentGate/g) || [];
+  assert.ok(gates.length >= 1, 'App renders a grown-up gate before reader management');
+  assert.match(app, /screen === 'kids' && !kidsGate/);
+});
+
+test('story early-tap shows a visible hint, not just spoken guidance', () => {
+  const lesson = src('components/LessonEarly.jsx');
+  assert.match(lesson, /Tap each line to hear the story first!/);
+  assert.match(lesson, /aria-live="polite"/);
+});
+
+test('locked accessory tap shows a visible explanation, not just spoken', () => {
+  const comp = src('components/Companion.jsx');
+  assert.match(comp, /Finish a lesson to earn a new accessory!/);
+  // Locked accessories must stay tappable (aria-disabled), never the
+  // browser-disabled dead buttons a small child can't get feedback from.
+  assert.match(comp, /aria-disabled=\{!unlocked\}/);
+  assert.doesNotMatch(comp, /^\s*disabled[=,\s]/m);
+});

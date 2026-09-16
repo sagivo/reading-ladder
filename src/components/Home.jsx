@@ -6,7 +6,7 @@
 // only through gated paths (here, or the gated ParentDash).
 
 import React, { useState, useEffect } from 'react';
-import { Screen, BigButton, Title, Subtitle, ParentGate } from './ui.jsx';
+import { Screen, BigButton, Title, Subtitle } from './ui.jsx';
 import { narrate as speak, isSoundEnabled, setSoundEnabled } from '../lib/narration.js';
 import { didLessonToday } from '../lib/store.js';
 import { COMPANIONS, COMPANION_COLORS, ACCESSORIES } from '../lib/curriculum.js';
@@ -65,23 +65,16 @@ function ProfileCard({ p, onTap, selected }) {
   );
 }
 
-/** "+ Add a reader" is parent business on a kid-facing screen: it opens
-    behind the grown-up math gate so a small child can't wander into
-    reader management (add/edit/archive). */
+/** "+ Add a reader" is parent business on a kid-facing screen. Tapping it
+    routes to reader management, which App.jsx keeps behind the grown-up
+    math gate — so a small child tapping this button immediately meets
+    "Grown-ups only", with exactly one gate (a second gate here would ask
+    the parent two math questions in a row). */
 function GatedAddReader({ onManageKids, dashed }) {
-  const [gating, setGating] = useState(false);
-  if (gating) {
-    return (
-      <ParentGate
-        onPass={() => { setGating(false); onManageKids(); }}
-        onCancel={() => setGating(false)}
-      />
-    );
-  }
   if (dashed) {
     return (
       <button
-        onClick={() => setGating(true)}
+        onClick={onManageKids}
         style={{
           padding: 14, borderRadius: 24, border: '4px dashed #b9b3d6', background: 'transparent',
           fontSize: 22, fontWeight: 700, color: '#7c5cd6', cursor: 'pointer', minHeight: 64,
@@ -89,7 +82,7 @@ function GatedAddReader({ onManageKids, dashed }) {
       >+ Add a reader</button>
     );
   }
-  return <BigButton onClick={() => setGating(true)}>+ Add a reader</BigButton>;
+  return <BigButton onClick={onManageKids}>+ Add a reader</BigButton>;
 }
 
 export default function Home({ profiles, activeId, onSelect, onParent, onManageKids, resumeFor, onResume }) {
